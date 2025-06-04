@@ -634,14 +634,14 @@ This package is open-source software licensed under the [MIT License](LICENSE).
 
 ## Support
 
-- **Documentation**: [GitHub Wiki](https://github.com/yourusername/log-management/wiki)
-- **Issues**: [GitHub Issues](https://github.com/yourusername/log-management/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/log-management/discussions)
+- **Documentation**: [GitHub Wiki](https://github.com/navinnm/log-management/wiki)
+- **Issues**: [GitHub Issues](https://github.com/navinnm/log-management/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/navinnm/log-management/discussions)
 
 ## Credits
 
 - **Author**: Fulgid
-- **Contributors**: [All Contributors](https://github.com/yourusername/log-management/contributors)
+- **Contributors**: [All Contributors](https://github.com/navinnm/log-management/contributors)
 
 ---
 
