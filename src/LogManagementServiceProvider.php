@@ -22,7 +22,7 @@ class LogManagementServiceProvider extends ServiceProvider
     public function register(): void
     {
         // Merge package configuration
-        $this->mergeConfigFrom(__DIR__ . 'config/log-management.php', 'log-management');
+        $this->mergeConfigFrom(__DIR__ . '/Config/log-management.php', 'log-management');
 
         // Register services
         $this->app->singleton(LogNotifierService::class, function ($app) {
@@ -66,7 +66,7 @@ class LogManagementServiceProvider extends ServiceProvider
 
         // Publish configuration
         $this->publishes([
-            __DIR__ . 'config/log-management.php' => config_path('log-management.php'),
+            __DIR__ . '/Config/log-management.php' => config_path('log-management.php'),
         ], 'log-management-config');
 
         // Publish views

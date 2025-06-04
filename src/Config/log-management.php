@@ -35,7 +35,7 @@ return [
     'environments' => [
         'production',
         'staging',
-        // 'local', // Uncomment to enable for local development
+        'local', // Uncomment to enable for local development
     ],
 
     /*
