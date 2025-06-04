@@ -4,7 +4,7 @@ All notable changes to `fulgid/log-management` will be documented in this file.
 
 ## [Unreleased]
 
-## [1.0.0] - 2024-01-01
+## [1.0.0] - 2025-06-04
 
 ### Added
 - Initial release
