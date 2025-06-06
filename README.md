@@ -226,7 +226,7 @@ Include the API key in your requests:
 
 ```bash
 # Header authentication
-curl -H "X-API-Key: your-api-key" https://yoursite.com/log-management/api/logs
+curl -H "X-Log-Management-Key: your-api-key" https://yoursite.com/log-management/api/logs
 
 # Query parameter authentication
 curl https://yoursite.com/log-management/api/logs?api_key=your-api-key
