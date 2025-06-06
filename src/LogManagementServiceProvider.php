@@ -5,7 +5,10 @@ namespace Fulgid\LogManagement;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Routing\Router;
 use Fulgid\LogManagement\Commands\LogManagementInstallCommand;
+use Fulgid\LogManagement\Commands\LogManagementTestCommand;
+use Fulgid\LogManagement\Commands\LogManagementCleanupCommand;
 use Fulgid\LogManagement\Handlers\LogHandler;
 use Fulgid\LogManagement\Services\LogNotifierService;
 use Fulgid\LogManagement\Services\LogStreamService;
@@ -13,6 +16,7 @@ use Fulgid\LogManagement\Services\LogFilterService;
 use Fulgid\LogManagement\Notifications\Channels\EmailChannel;
 use Fulgid\LogManagement\Notifications\Channels\SlackChannel;
 use Fulgid\LogManagement\Notifications\Channels\WebhookChannel;
+use Fulgid\LogManagement\Middleware\LogManagementAuth;
 
 class LogManagementServiceProvider extends ServiceProvider
 {
@@ -48,6 +52,9 @@ class LogManagementServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Register middleware
+        $this->registerMiddleware();
+
         // Load routes
         $this->loadRoutesFrom(__DIR__ . '/../routes/web.php');
 
@@ -61,6 +68,8 @@ class LogManagementServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 LogManagementInstallCommand::class,
+                LogManagementTestCommand::class,
+                LogManagementCleanupCommand::class,
             ]);
         }
 
@@ -74,6 +83,11 @@ class LogManagementServiceProvider extends ServiceProvider
             __DIR__ . '/../resources/views' => resource_path('views/vendor/log-management'),
         ], 'log-management-views');
 
+        // Publish migrations
+        $this->publishes([
+            __DIR__ . '/../database/migrations' => database_path('migrations'),
+        ], 'log-management-migrations');
+
         // Register log handler if enabled
         if (config('log-management.enabled', true)) {
             $this->registerLogHandler();
@@ -81,6 +95,22 @@ class LogManagementServiceProvider extends ServiceProvider
 
         // Register default notification channels
         $this->registerNotificationChannels();
+    }
+
+    /**
+     * Register middleware.
+     */
+    protected function registerMiddleware(): void
+    {
+        $router = $this->app->make(Router::class);
+        
+        // Register the middleware
+        $router->aliasMiddleware('log-management-auth', LogManagementAuth::class);
+        
+        // Alternative method for older Laravel versions
+        if (method_exists($router, 'middleware')) {
+            $router->middleware('log-management-auth', LogManagementAuth::class);
+        }
     }
 
     /**
