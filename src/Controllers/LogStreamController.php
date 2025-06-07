@@ -3,11 +3,11 @@
 namespace Fulgid\LogManagement\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Illuminate\Routing\Controller;
 use Fulgid\LogManagement\Services\LogStreamService;
 use Fulgid\LogManagement\Models\LogEntry;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Illuminate\Support\Facades\Log;
 
 class LogStreamController extends Controller
 {
@@ -18,624 +18,381 @@ class LogStreamController extends Controller
         $this->streamService = $streamService;
     }
 
-/**
- * Stream logs via Server-Sent Events.
- */
-public function stream(Request $request): StreamedResponse
-{
-    // Debug logging
-    \Log::info('SSE Stream requested', [
-        'ip' => $request->ip(),
-        'user_agent' => $request->userAgent(),
-        'headers' => $request->headers->all()
-    ]);
-
-    // Validate access
-    if (!$this->hasAccess($request)) {
-        \Log::warning('SSE Stream access denied');
-        abort(403, 'Unauthorized access to log stream');
-    }
-
-    // Check if SSE is enabled
-    if (!config('log-management.sse.enabled', true)) {
-        \Log::warning('SSE is disabled in configuration');
-        return response('SSE is disabled', 503);
-    }
-
-    return new StreamedResponse(function () use ($request) {
-        // Set up the stream with error handling
-        try {
-            $this->setupStreamWithDebug($request);
-        } catch (\Exception $e) {
-            \Log::error('SSE Stream error: ' . $e->getMessage(), [
-                'exception' => $e->getTraceAsString()
-            ]);
-            echo "data: " . json_encode(['error' => 'Stream initialization failed']) . "\n\n";
-            flush();
-        }
-    }, 200, [
-        'Content-Type' => 'text/event-stream',
-        'Cache-Control' => 'no-cache, no-store, must-revalidate',
-        'Pragma' => 'no-cache',
-        'Expires' => '0',
-        'Connection' => 'keep-alive',
-        'Access-Control-Allow-Origin' => '*',
-        'Access-Control-Allow-Headers' => 'Cache-Control',
-        'X-Accel-Buffering' => 'no', // Disable nginx buffering
-    ]);
-}
-
-
-/**
- * Setup the SSE stream with debugging.
- */
-protected function setupStreamWithDebug(Request $request): void
-{
-    // Disable time limit and output buffering
-    set_time_limit(0);
-    ignore_user_abort(false);
-
-    // Disable all output buffering
-    while (ob_get_level()) {
-        ob_end_clean();
-    }
-
-    // Send initial connection message
-    $connectionData = [
-        'type' => 'connected',
-        'timestamp' => now()->toISOString(),
-        'message' => 'Log stream connected successfully',
-        'server_time' => time(),
-        'config' => [
-            'heartbeat_interval' => config('log-management.sse.heartbeat_interval', 30),
-            'connection_timeout' => config('log-management.sse.connection_timeout', 600),
-        ]
-    ];
-
-    echo "data: " . json_encode($connectionData) . "\n\n";
-    flush();
-
-    // Send some test messages first
-    for ($i = 1; $i <= 3; $i++) {
-        echo "data: " . json_encode([
-            'type' => 'test',
-            'message' => "Test message {$i}",
-            'timestamp' => now()->toISOString(),
-            'counter' => $i
-        ]) . "\n\n";
-        flush();
-        sleep(1);
-    }
-
-    // Get recent logs if requested
-    if ($request->get('include_recent', false)) {
-        $this->sendRecentLogsWithDebug();
-    }
-
-    // Start the main connection loop
-    $this->maintainConnectionWithDebug();
-}
-
-/**
- * Send recent logs with debug info.
- */
-protected function sendRecentLogsWithDebug(): void
-{
-    try {
-        $logs = \Fulgid\LogManagement\Models\LogEntry::orderBy('created_at', 'desc')
-            ->limit(5)
-            ->get();
-
-        echo "data: " . json_encode([
-            'type' => 'recent_logs_count',
-            'count' => $logs->count(),
-            'timestamp' => now()->toISOString()
-        ]) . "\n\n";
-        flush();
-
-        foreach ($logs as $log) {
-            $logData = [
-                'type' => 'log',
-                'id' => $log->id,
-                'level' => $log->level,
-                'message' => $log->message,
-                'channel' => $log->channel,
-                'timestamp' => $log->created_at->toISOString(),
-                'context' => json_decode($log->context, true) ?? [],
-            ];
-
-            echo "data: " . json_encode($logData) . "\n\n";
-            flush();
-            usleep(100000); // 0.1 second delay
-        }
-    } catch (\Exception $e) {
-        echo "data: " . json_encode([
-            'type' => 'error',
-            'message' => 'Failed to load recent logs: ' . $e->getMessage()
-        ]) . "\n\n";
-        flush();
-    }
-}
-
-/**
- * Maintain connection with debug info.
- */
-protected function maintainConnectionWithDebug(): void
-{
-    $startTime = time();
-    $lastHeartbeat = time();
-    $messageCount = 0;
-
-    while (true) {
-        $currentTime = time();
-        
-        // Check if client disconnected
-        if (connection_aborted()) {
-            \Log::info('SSE client disconnected');
-            break;
-        }
-
-        // Send heartbeat every 10 seconds (reduced for testing)
-        if ($currentTime - $lastHeartbeat >= 10) {
-            $heartbeatData = [
-                'type' => 'heartbeat',
-                'timestamp' => now()->toISOString(),
-                'uptime' => $currentTime - $startTime,
-                'memory_usage' => memory_get_usage(true),
-                'peak_memory' => memory_get_peak_usage(true),
-            ];
-
-            echo "data: " . json_encode($heartbeatData) . "\n\n";
-            flush();
-            
-            $lastHeartbeat = $currentTime;
-            $messageCount++;
-
-            \Log::debug('SSE heartbeat sent', ['count' => $messageCount]);
-        }
-
-        // Check for new log entries (simplified for testing)
-        if ($messageCount % 5 === 0 && $messageCount > 0) {
-            echo "data: " . json_encode([
-                'type' => 'sample_log',
-                'level' => 'info',
-                'message' => 'Sample log message for testing - ' . $messageCount,
-                'timestamp' => now()->toISOString(),
-            ]) . "\n\n";
-            flush();
-        }
-
-        // Break after 5 minutes for testing
-        if ($currentTime - $startTime > 300) {
-            echo "data: " . json_encode([
-                'type' => 'timeout',
-                'message' => 'Connection timeout for testing'
-            ]) . "\n\n";
-            flush();
-            break;
-        }
-
-        // Small delay
-        usleep(500000); // 0.5 seconds
-    }
-
-    \Log::info('SSE connection ended', [
-        'duration' => time() - $startTime,
-        'messages_sent' => $messageCount
-    ]);
-}
-
-
-
-
-
-
-
-
-
-/**
- * Flush output to client.
- */
-protected function flushOutput(): void
-{
-    if (ob_get_level()) {
-        ob_flush();
-    }
-    flush();
-}
-
-/**
- * Maintain the SSE connection with proper event handling.
- */
-protected function maintainConnection(Request $request): void
-{
-    $lastHeartbeat = time();
-    $startTime = time();
-    
-    while (!connection_aborted()) {
-        // Check for connection timeout (10 minutes)
-        if (time() - $startTime > 600) {
-            echo "data: " . json_encode([
-                'type' => 'timeout',
-                'message' => 'Connection timeout, please reconnect'
-            ]) . "\n\n";
-            $this->flushOutput();
-            break;
-        }
-
-        // Send heartbeat every 30 seconds
-        if (time() - $lastHeartbeat >= 30) {
-            echo "data: " . json_encode([
-                'type' => 'heartbeat',
-                'timestamp' => now()->toISOString()
-            ]) . "\n\n";
-            $this->flushOutput();
-            $lastHeartbeat = time();
-        }
-
-        // Check for new log entries (polling approach)
-        $this->checkForNewLogs($request);
-
-        // Small sleep to prevent excessive CPU usage
-        usleep(500000); // 0.5 seconds
-    }
-}
-
-/**
- * Check for new log entries and send them.
- */
-protected function checkForNewLogs(Request $request): void
-{
-    static $lastLogId = null;
-    
-    if ($lastLogId === null) {
-        $lastLogId = LogEntry::max('id') ?? 0;
-        return;
-    }
-
-    $newLogs = LogEntry::where('id', '>', $lastLogId)
-        ->orderBy('id', 'asc')
-        ->limit(10)
-        ->get();
-
-    foreach ($newLogs as $log) {
-        $logData = [
-            'id' => $log->id,
-            'type' => 'log',
-            'timestamp' => $log->created_at->toISOString(),
-            'level' => $log->level,
-            'message' => $log->message,
-            'channel' => $log->channel,
-            'context' => json_decode($log->context, true) ?? [],
-        ];
-
-        echo "data: " . json_encode($logData) . "\n\n";
-        $this->flushOutput();
-        
-        $lastLogId = $log->id;
-    }
-}
-
-/**
- * Send recent log entries for initial load.
- */
-protected function sendRecentLogs(Request $request): void
-{
-    $query = LogEntry::query()
-        ->orderBy('created_at', 'desc')
-        ->limit(20);
-
-    // Apply filters from request
-    if ($request->has('level')) {
-        $levels = is_array($request->level) ? $request->level : [$request->level];
-        $query->whereIn('level', $levels);
-    }
-
-    $logs = $query->get()->reverse();
-
-    foreach ($logs as $log) {
-        $logData = [
-            'id' => $log->id,
-            'type' => 'log',
-            'timestamp' => $log->created_at->toISOString(),
-            'level' => $log->level,
-            'message' => $log->message,
-            'channel' => $log->channel,
-            'context' => json_decode($log->context, true) ?? [],
-        ];
-
-        echo "data: " . json_encode($logData) . "\n\n";
-        $this->flushOutput();
-    }
-}
-
-
     /**
-     * Get log entries for initial load or pagination.
+     * Stream logs via Server-Sent Events.
      */
-    public function getLogs(Request $request)
+    public function stream(Request $request): StreamedResponse
     {
+        // Validate access
         if (!$this->hasAccess($request)) {
-            return response()->json(['error' => 'Unauthorized'], 403);
+            abort(403, 'Unauthorized access to log stream');
         }
 
-        $query = LogEntry::query();
-
-        // Apply filters
-        if ($request->has('level')) {
-            $levels = is_array($request->level) ? $request->level : [$request->level];
-            $query->whereIn('level', $levels);
+        // Check if SSE is enabled
+        if (!config('log-management.sse.enabled', true)) {
+            return response('SSE is disabled', 503);
         }
 
-        if ($request->has('channel')) {
-            $query->where('channel', $request->channel);
-        }
-
-        if ($request->has('search')) {
-            $query->where('message', 'like', '%' . $request->search . '%');
-        }
-
-        if ($request->has('from')) {
-            $query->where('created_at', '>=', $request->from);
-        }
-
-        if ($request->has('to')) {
-            $query->where('created_at', '<=', $request->to);
-        }
-
-        // Pagination
-        $perPage = min($request->get('per_page', 50), 100);
-        $logs = $query->orderBy('created_at', 'desc')->paginate($perPage);
-
-        return response()->json([
-            'data' => $logs->items(),
-            'pagination' => [
-                'current_page' => $logs->currentPage(),
-                'last_page' => $logs->lastPage(),
-                'per_page' => $logs->perPage(),
-                'total' => $logs->total(),
-            ]
+        return new StreamedResponse(function () use ($request) {
+            $this->setupSSEStream($request);
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Pragma' => 'no-cache',
+            'Expires' => '0',
+            'Connection' => 'keep-alive',
+            'Access-Control-Allow-Origin' => '*',
+            'Access-Control-Allow-Headers' => 'Cache-Control, Authorization, X-Log-Management-Key',
+            'X-Accel-Buffering' => 'no', // Disable nginx buffering
         ]);
     }
 
     /**
-     * Get a single log entry by ID.
+     * Setup the SSE stream with proper formatting.
      */
-    public function getLog(Request $request, $id)
+    protected function setupSSEStream(Request $request): void
     {
-        if (!$this->hasAccess($request)) {
-            return response()->json(['error' => 'Unauthorized'], 403);
-        }
-
-        $log = LogEntry::find($id);
-
-        if (!$log) {
-            return response()->json(['error' => 'Log entry not found'], 404);
-        }
-
-        return response()->json([
-            'id' => $log->id,
-            'level' => $log->level,
-            'channel' => $log->channel,
-            'message' => $log->message,
-            'context' => $log->context,
-            'extra' => $log->extra,
-            'created_at' => $log->created_at->toISOString(),
-            'updated_at' => $log->updated_at?->toISOString(),
-        ]);
-    }
-
-    /**
-     * Search logs with advanced filtering.
-     */
-    public function searchLogs(Request $request)
-    {
-        if (!$this->hasAccess($request)) {
-            return response()->json(['error' => 'Unauthorized'], 403);
-        }
-
-        $query = LogEntry::query();
-
-        // Apply search filters
-        if ($request->has('q')) {
-            $searchTerm = $request->get('q');
-            $query->where(function ($q) use ($searchTerm) {
-                $q->where('message', 'like', "%{$searchTerm}%")
-                  ->orWhere('context', 'like', "%{$searchTerm}%")
-                  ->orWhere('extra', 'like', "%{$searchTerm}%");
-            });
-        }
-
-        // Apply other filters
-        if ($request->has('level')) {
-            $levels = is_array($request->level) ? $request->level : [$request->level];
-            $query->whereIn('level', $levels);
-        }
-
-        if ($request->has('channel')) {
-            $query->where('channel', $request->channel);
-        }
-
-        if ($request->has('date_from')) {
-            $query->where('created_at', '>=', $request->date_from);
-        }
-
-        if ($request->has('date_to')) {
-            $query->where('created_at', '<=', $request->date_to);
-        }
-
-        // Pagination
-        $perPage = min($request->get('per_page', 20), 100);
-        $logs = $query->orderBy('created_at', 'desc')->paginate($perPage);
-
-        return response()->json([
-            'data' => $logs->items(),
-            'meta' => [
-                'current_page' => $logs->currentPage(),
-                'last_page' => $logs->lastPage(),
-                'per_page' => $logs->perPage(),
-                'total' => $logs->total(),
-                'from' => $logs->firstItem(),
-                'to' => $logs->lastItem(),
-            ],
-            'links' => [
-                'first' => $logs->url(1),
-                'last' => $logs->url($logs->lastPage()),
-                'prev' => $logs->previousPageUrl(),
-                'next' => $logs->nextPageUrl(),
-            ]
-        ]);
-    }
-
-    /**
-     * Get streaming statistics.
-     */
-    public function stats(Request $request)
-    {
-        if (!$this->hasAccess($request)) {
-            return response()->json(['error' => 'Unauthorized'], 403);
-        }
-
-        $stats = [
-            'stream_stats' => $this->streamService->getStats(),
-            'log_counts' => [
-                'total' => LogEntry::count(),
-                'today' => LogEntry::whereDate('created_at', today())->count(),
-                'last_hour' => LogEntry::where('created_at', '>=', now()->subHour())->count(),
-                'last_24_hours' => LogEntry::where('created_at', '>=', now()->subDay())->count(),
-            ],
-            'level_breakdown' => LogEntry::selectRaw('level, COUNT(*) as count')
-                ->where('created_at', '>=', now()->subDay())
-                ->groupBy('level')
-                ->pluck('count', 'level')
-                ->toArray(),
-            'channel_breakdown' => LogEntry::selectRaw('channel, COUNT(*) as count')
-                ->where('created_at', '>=', now()->subDay())
-                ->groupBy('channel')
-                ->limit(10)
-                ->pluck('count', 'channel')
-                ->toArray(),
-        ];
-
-        return response()->json($stats);
-    }
-
-    /**
-     * Get statistics summary.
-     */
-    public function getStatsSummary(Request $request)
-    {
-        if (!$this->hasAccess($request)) {
-            return response()->json(['error' => 'Unauthorized'], 403);
-        }
-
-        $days = $request->get('days', 7);
-        $fromDate = now()->subDays($days);
-
-        return response()->json([
-            'period' => "{$days} days",
-            'from_date' => $fromDate->toDateString(),
-            'to_date' => now()->toDateString(),
-            'summary' => LogEntry::getStats($days),
-        ]);
-    }
-
-    /**
-     * Get statistics trends.
-     */
-    public function getStatsTrends(Request $request)
-    {
-        if (!$this->hasAccess($request)) {
-            return response()->json(['error' => 'Unauthorized'], 403);
-        }
-
-        $days = $request->get('days', 7);
-        $fromDate = now()->subDays($days);
-
-        $trends = LogEntry::selectRaw('DATE(created_at) as date, level, COUNT(*) as count')
-            ->where('created_at', '>=', $fromDate)
-            ->groupBy('date', 'level')
-            ->orderBy('date')
-            ->get()
-            ->groupBy('date')
-            ->map(function ($dayLogs) {
-                return $dayLogs->pluck('count', 'level')->toArray();
-            });
-
-        return response()->json([
-            'period' => "{$days} days",
-            'trends' => $trends,
-        ]);
-    }
-
-    /**
-     * Health check endpoint.
-     */
-    public function health(Request $request)
-    {
-        $health = [
-            'status' => 'ok',
-            'timestamp' => now()->toISOString(),
-            'services' => [
-                'database' => $this->checkDatabase(),
-                'sse' => config('log-management.sse.enabled', true),
-                'notifications' => config('log-management.notifications.enabled', true),
-            ]
-        ];
-
-        $overallHealth = collect($health['services'])->every(fn($status) => $status === true || $status === 'ok');
-
-        return response()->json($health, $overallHealth ? 200 : 503);
-    }
-
-    /**
-     * Setup the SSE stream.
-     */
-    protected function setupStream(): void
-    {
-        // Disable time limit for long-running connection
+        // Configure PHP for long-running processes
         set_time_limit(0);
-
-        // Disable output buffering
+        ignore_user_abort(false);
+        
+        // Disable output buffering completely
         if (ob_get_level()) {
             ob_end_clean();
         }
+        
+        // Start output buffering with immediate flush
+        ob_start(null, 0, PHP_OUTPUT_HANDLER_FLUSHABLE);
 
-        // Send initial connection message
-        echo "data: " . json_encode([
-            'type' => 'connected',
-            'timestamp' => now()->toISOString(),
-            'message' => 'Log stream connected'
-        ]) . "\n\n";
+        try {
+            // Send initial connection message
+            $this->sendSSEMessage([
+                'type' => 'connected',
+                'message' => 'Log stream connected successfully',
+                'timestamp' => now()->toISOString(),
+                'filters' => $request->all(),
+                'config' => [
+                    'heartbeat_interval' => 30,
+                    'timeout' => 1800, // 30 minutes
+                ]
+            ], 'connection');
 
+            // Send recent logs if requested
+            if ($request->boolean('include_recent')) {
+                $this->sendRecentLogs($request);
+            }
+
+            // Start the main connection loop
+            $this->maintainConnection($request);
+
+        } catch (\Exception $e) {
+            Log::error('SSE Stream error: ' . $e->getMessage(), [
+                'exception' => $e->getTraceAsString(),
+                'request' => $request->all()
+            ]);
+            
+            $this->sendSSEMessage([
+                'type' => 'error',
+                'message' => 'Stream error occurred',
+                'timestamp' => now()->toISOString()
+            ], 'error');
+        }
+    }
+
+    /**
+     * Send a properly formatted SSE message.
+     */
+    protected function sendSSEMessage(array $data, string $event = 'message', ?string $id = null): void
+    {
+        if ($id) {
+            echo "id: {$id}\n";
+        }
+        
+        echo "event: {$event}\n";
+        echo "data: " . json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n\n";
+        
+        $this->flushOutput();
+    }
+
+    /**
+     * Send recent logs to initialize the stream.
+     */
+    protected function sendRecentLogs(Request $request): void
+    {
+        try {
+            $query = LogEntry::orderBy('created_at', 'desc')->limit(50);
+            
+            // Apply filters
+            $this->applyFilters($query, $request);
+            
+            $logs = $query->get();
+            
+            foreach ($logs->reverse() as $log) {
+                $this->sendSSEMessage([
+                    'type' => 'log',
+                    'id' => $log->id,
+                    'level' => $log->level,
+                    'message' => $log->message,
+                    'channel' => $log->channel,
+                    'timestamp' => $log->created_at->toISOString(),
+                    'context' => $log->context ?? [],
+                    'user_id' => $log->user_id,
+                    'environment' => $log->environment,
+                    'url' => $log->url,
+                    'ip_address' => $log->ip_address,
+                    'execution_time' => $log->execution_time,
+                    'memory_usage' => $log->memory_usage,
+                ], 'log', 'log-' . $log->id);
+                
+                // Small delay to prevent overwhelming
+                usleep(50000); // 0.05 seconds
+            }
+            
+            $this->sendSSEMessage([
+                'type' => 'recent_logs_complete',
+                'count' => $logs->count(),
+                'timestamp' => now()->toISOString()
+            ], 'status');
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to send recent logs: ' . $e->getMessage());
+            
+            $this->sendSSEMessage([
+                'type' => 'error',
+                'message' => 'Failed to load recent logs',
+                'timestamp' => now()->toISOString()
+            ], 'error');
+        }
+    }
+
+    /**
+     * Maintain the SSE connection with proper event handling.
+     */
+    protected function maintainConnection(Request $request): void
+    {
+        $lastHeartbeat = time();
+        $lastLogId = $this->getLastLogId();
+        $startTime = time();
+        $heartbeatInterval = 30; // seconds
+        $maxDuration = 1800; // 30 minutes
+        
+        while (!connection_aborted() && (time() - $startTime) < $maxDuration) {
+            $currentTime = time();
+            
+            // Send heartbeat
+            if ($currentTime - $lastHeartbeat >= $heartbeatInterval) {
+                $this->sendSSEMessage([
+                    'type' => 'heartbeat',
+                    'timestamp' => now()->toISOString(),
+                    'uptime' => $currentTime - $startTime,
+                    'memory_usage' => memory_get_usage(true),
+                    'peak_memory' => memory_get_peak_usage(true),
+                    'connection_count' => $this->getActiveConnectionCount(),
+                ], 'heartbeat');
+                
+                $lastHeartbeat = $currentTime;
+            }
+
+            // Check for new logs
+            $newLogId = $this->checkForNewLogs($request, $lastLogId);
+            if ($newLogId > $lastLogId) {
+                $lastLogId = $newLogId;
+            }
+
+            // Send statistics periodically (every 2 minutes)
+            if ($currentTime % 120 === 0) {
+                $this->sendStatistics();
+            }
+
+            // Sleep to prevent excessive CPU usage
+            usleep(500000); // 0.5 seconds
+        }
+
+        // Send connection closing message
+        $this->sendSSEMessage([
+            'type' => 'connection_closing',
+            'reason' => connection_aborted() ? 'client_disconnected' : 'timeout',
+            'duration' => time() - $startTime,
+            'timestamp' => now()->toISOString()
+        ], 'disconnect');
+    }
+
+    /**
+     * Check for new log entries and send them.
+     */
+    protected function checkForNewLogs(Request $request, int $lastLogId): int
+    {
+        try {
+            $query = LogEntry::where('id', '>', $lastLogId)
+                ->orderBy('id', 'asc')
+                ->limit(20);
+            
+            // Apply filters
+            $this->applyFilters($query, $request);
+            
+            $newLogs = $query->get();
+            $maxId = $lastLogId;
+
+            foreach ($newLogs as $log) {
+                $this->sendSSEMessage([
+                    'type' => 'log',
+                    'id' => $log->id,
+                    'level' => $log->level,
+                    'message' => $log->message,
+                    'channel' => $log->channel,
+                    'timestamp' => $log->created_at->toISOString(),
+                    'context' => $log->context ?? [],
+                    'user_id' => $log->user_id,
+                    'environment' => $log->environment,
+                    'url' => $log->url,
+                    'ip_address' => $log->ip_address,
+                    'execution_time' => $log->execution_time,
+                    'memory_usage' => $log->memory_usage,
+                    'is_new' => true,
+                ], 'log', 'log-' . $log->id);
+                
+                $maxId = max($maxId, $log->id);
+            }
+
+            return $maxId;
+            
+        } catch (\Exception $e) {
+            Log::error('Error checking for new logs: ' . $e->getMessage());
+            return $lastLogId;
+        }
+    }
+
+    /**
+     * Apply filters to the log query.
+     */
+    protected function applyFilters($query, Request $request): void
+    {
+        // Filter by log levels
+        if ($request->has('level') && !empty($request->level)) {
+            $levels = is_array($request->level) ? $request->level : [$request->level];
+            $query->whereIn('level', $levels);
+        }
+
+        // Filter by channels
+        if ($request->has('channel') && !empty($request->channel)) {
+            $query->where('channel', $request->channel);
+        }
+
+        // Filter by search term
+        if ($request->has('search') && !empty($request->search)) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('message', 'like', "%{$search}%")
+                  ->orWhere('context', 'like', "%{$search}%");
+            });
+        }
+
+        // Filter by user ID
+        if ($request->has('user_id') && !empty($request->user_id)) {
+            $query->where('user_id', $request->user_id);
+        }
+
+        // Filter by environment
+        if ($request->has('environment') && !empty($request->environment)) {
+            $query->where('environment', $request->environment);
+        }
+
+        // Filter by date range
+        if ($request->has('since')) {
+            $since = $request->since;
+            if (is_numeric($since)) {
+                // Unix timestamp
+                $query->where('created_at', '>=', date('Y-m-d H:i:s', $since));
+            } else {
+                // Relative time (e.g., '1h', '30m', '1d')
+                $query->where('created_at', '>=', $this->parseRelativeTime($since));
+            }
+        }
+    }
+
+    /**
+     * Parse relative time strings like '1h', '30m', '1d'.
+     */
+    protected function parseRelativeTime(string $time): string
+    {
+        if (preg_match('/^(\d+)([smhd])$/', $time, $matches)) {
+            $amount = (int) $matches[1];
+            $unit = $matches[2];
+            
+            return match ($unit) {
+                's' => now()->subSeconds($amount)->toDateTimeString(),
+                'm' => now()->subMinutes($amount)->toDateTimeString(),
+                'h' => now()->subHours($amount)->toDateTimeString(),
+                'd' => now()->subDays($amount)->toDateTimeString(),
+                default => now()->subHour()->toDateTimeString(),
+            };
+        }
+        
+        return now()->subHour()->toDateTimeString();
+    }
+
+    /**
+     * Get the last log ID for tracking new entries.
+     */
+    protected function getLastLogId(): int
+    {
+        try {
+            return LogEntry::max('id') ?? 0;
+        } catch (\Exception $e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Get active connection count (mock implementation).
+     */
+    protected function getActiveConnectionCount(): int
+    {
+        // This would need to be implemented with a shared store like Redis
+        // For now, return a placeholder
+        return 1;
+    }
+
+    /**
+     * Send current statistics.
+     */
+    protected function sendStatistics(): void
+    {
+        try {
+            $stats = [
+                'type' => 'statistics',
+                'timestamp' => now()->toISOString(),
+                'total_logs' => LogEntry::count(),
+                'logs_today' => LogEntry::whereDate('created_at', today())->count(),
+                'errors_today' => LogEntry::whereDate('created_at', today())
+                    ->whereIn('level', ['error', 'critical', 'emergency', 'alert'])
+                    ->count(),
+                'level_breakdown' => LogEntry::selectRaw('level, COUNT(*) as count')
+                    ->whereDate('created_at', today())
+                    ->groupBy('level')
+                    ->pluck('count', 'level')
+                    ->toArray(),
+            ];
+            
+            $this->sendSSEMessage($stats, 'statistics');
+            
+        } catch (\Exception $e) {
+            Log::error('Failed to send statistics: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Flush output to client.
+     */
+    protected function flushOutput(): void
+    {
         if (ob_get_level()) {
             ob_flush();
         }
         flush();
     }
 
- 
-    /**
-     * Get filters from request parameters.
-     */
-    protected function getFiltersFromRequest(Request $request): array
-    {
-        $filters = [];
-
-        if ($request->has('level')) {
-            $filters['level'] = is_array($request->level) ? $request->level : [$request->level];
-        }
-
-        if ($request->has('channel')) {
-            $filters['channel'] = $request->channel;
-        }
-
-        if ($request->has('search')) {
-            $filters['search'] = $request->search;
-        }
-
-        return $filters;
-    }
+    // ... [keep all your existing methods: getLogs, getLog, searchLogs, etc.]
 
     /**
      * Check if request has access to log management.
@@ -648,8 +405,16 @@ protected function sendRecentLogs(Request $request): void
         }
 
         // Check for API key
-        $apiKey = $request->header('X-Log-Management-Key') ?? $request->query('key');
-        $validKeys = config('log-management.auth.api_keys', []);
+        $apiKey = $request->header('X-Log-Management-Key') ?? 
+                  $request->header('Authorization') ?? 
+                  $request->query('key');
+
+        // Handle Bearer token format
+        if ($apiKey && str_starts_with($apiKey, 'Bearer ')) {
+            $apiKey = substr($apiKey, 7);
+        }
+
+        $validKeys = array_filter(config('log-management.auth.api_keys', []));
 
         if ($apiKey && in_array($apiKey, $validKeys)) {
             return true;
@@ -660,7 +425,6 @@ protected function sendRecentLogs(Request $request): void
             $user = auth()->user();
             $requiredPermission = config('log-management.auth.permission', 'view-logs');
 
-            // If no specific permission method exists, allow authenticated users
             if (!method_exists($user, 'can')) {
                 return true;
             }
@@ -669,18 +433,5 @@ protected function sendRecentLogs(Request $request): void
         }
 
         return false;
-    }
-
-    /**
-     * Check database connectivity.
-     */
-    protected function checkDatabase(): string
-    {
-        try {
-            LogEntry::count();
-            return 'ok';
-        } catch (\Exception $e) {
-            return 'error';
-        }
     }
 }

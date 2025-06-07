@@ -59,6 +59,45 @@ Route::group([
     
     // Statistics endpoint
     Route::get('/stats', [LogStreamController::class, 'stats'])->name('stats');
+    Route::post('/test-log', function (Request $request) {
+    // Check authentication
+    if (config('log-management.auth.enabled', false)) {
+        $apiKey = $request->header('X-Log-Management-Key') ?? $request->query('key');
+        $validKeys = array_filter(config('log-management.auth.api_keys', []));
+        
+        if (!$apiKey || !in_array($apiKey, $validKeys)) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+    }
+    
+    // Validate request
+    $validated = $request->validate([
+        'level' => 'required|in:emergency,alert,critical,error,warning,notice,info,debug',
+        'message' => 'required|string|max:1000',
+        'context' => 'array'
+    ]);
+    
+    try {
+        // Generate the log
+        Log::log(
+            $validated['level'], 
+            $validated['message'], 
+            $validated['context'] ?? []
+        );
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Test log generated successfully',
+            'timestamp' => now()->toISOString()
+        ]);
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => 'Failed to generate log: ' . $e->getMessage()
+        ], 500);
+    }
+})->name('log-management.api.test-log');
     
 });
 
