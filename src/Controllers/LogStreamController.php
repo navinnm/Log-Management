@@ -18,39 +18,337 @@ class LogStreamController extends Controller
         $this->streamService = $streamService;
     }
 
-    /**
-     * Stream logs via Server-Sent Events.
-     */
-    public function stream(Request $request): StreamedResponse
-    {
-        // Validate access
-        if (!$this->hasAccess($request)) {
-            abort(403, 'Unauthorized access to log stream');
+/**
+ * Stream logs via Server-Sent Events.
+ */
+public function stream(Request $request): StreamedResponse
+{
+    // Debug logging
+    \Log::info('SSE Stream requested', [
+        'ip' => $request->ip(),
+        'user_agent' => $request->userAgent(),
+        'headers' => $request->headers->all()
+    ]);
+
+    // Validate access
+    if (!$this->hasAccess($request)) {
+        \Log::warning('SSE Stream access denied');
+        abort(403, 'Unauthorized access to log stream');
+    }
+
+    // Check if SSE is enabled
+    if (!config('log-management.sse.enabled', true)) {
+        \Log::warning('SSE is disabled in configuration');
+        return response('SSE is disabled', 503);
+    }
+
+    return new StreamedResponse(function () use ($request) {
+        // Set up the stream with error handling
+        try {
+            $this->setupStreamWithDebug($request);
+        } catch (\Exception $e) {
+            \Log::error('SSE Stream error: ' . $e->getMessage(), [
+                'exception' => $e->getTraceAsString()
+            ]);
+            echo "data: " . json_encode(['error' => 'Stream initialization failed']) . "\n\n";
+            flush();
+        }
+    }, 200, [
+        'Content-Type' => 'text/event-stream',
+        'Cache-Control' => 'no-cache, no-store, must-revalidate',
+        'Pragma' => 'no-cache',
+        'Expires' => '0',
+        'Connection' => 'keep-alive',
+        'Access-Control-Allow-Origin' => '*',
+        'Access-Control-Allow-Headers' => 'Cache-Control',
+        'X-Accel-Buffering' => 'no', // Disable nginx buffering
+    ]);
+}
+
+
+/**
+ * Setup the SSE stream with debugging.
+ */
+protected function setupStreamWithDebug(Request $request): void
+{
+    // Disable time limit and output buffering
+    set_time_limit(0);
+    ignore_user_abort(false);
+
+    // Disable all output buffering
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+
+    // Send initial connection message
+    $connectionData = [
+        'type' => 'connected',
+        'timestamp' => now()->toISOString(),
+        'message' => 'Log stream connected successfully',
+        'server_time' => time(),
+        'config' => [
+            'heartbeat_interval' => config('log-management.sse.heartbeat_interval', 30),
+            'connection_timeout' => config('log-management.sse.connection_timeout', 600),
+        ]
+    ];
+
+    echo "data: " . json_encode($connectionData) . "\n\n";
+    flush();
+
+    // Send some test messages first
+    for ($i = 1; $i <= 3; $i++) {
+        echo "data: " . json_encode([
+            'type' => 'test',
+            'message' => "Test message {$i}",
+            'timestamp' => now()->toISOString(),
+            'counter' => $i
+        ]) . "\n\n";
+        flush();
+        sleep(1);
+    }
+
+    // Get recent logs if requested
+    if ($request->get('include_recent', false)) {
+        $this->sendRecentLogsWithDebug();
+    }
+
+    // Start the main connection loop
+    $this->maintainConnectionWithDebug();
+}
+
+/**
+ * Send recent logs with debug info.
+ */
+protected function sendRecentLogsWithDebug(): void
+{
+    try {
+        $logs = \Fulgid\LogManagement\Models\LogEntry::orderBy('created_at', 'desc')
+            ->limit(5)
+            ->get();
+
+        echo "data: " . json_encode([
+            'type' => 'recent_logs_count',
+            'count' => $logs->count(),
+            'timestamp' => now()->toISOString()
+        ]) . "\n\n";
+        flush();
+
+        foreach ($logs as $log) {
+            $logData = [
+                'type' => 'log',
+                'id' => $log->id,
+                'level' => $log->level,
+                'message' => $log->message,
+                'channel' => $log->channel,
+                'timestamp' => $log->created_at->toISOString(),
+                'context' => json_decode($log->context, true) ?? [],
+            ];
+
+            echo "data: " . json_encode($logData) . "\n\n";
+            flush();
+            usleep(100000); // 0.1 second delay
+        }
+    } catch (\Exception $e) {
+        echo "data: " . json_encode([
+            'type' => 'error',
+            'message' => 'Failed to load recent logs: ' . $e->getMessage()
+        ]) . "\n\n";
+        flush();
+    }
+}
+
+/**
+ * Maintain connection with debug info.
+ */
+protected function maintainConnectionWithDebug(): void
+{
+    $startTime = time();
+    $lastHeartbeat = time();
+    $messageCount = 0;
+
+    while (true) {
+        $currentTime = time();
+        
+        // Check if client disconnected
+        if (connection_aborted()) {
+            \Log::info('SSE client disconnected');
+            break;
         }
 
-        // Get filters from request
-        $filters = $this->getFiltersFromRequest($request);
+        // Send heartbeat every 10 seconds (reduced for testing)
+        if ($currentTime - $lastHeartbeat >= 10) {
+            $heartbeatData = [
+                'type' => 'heartbeat',
+                'timestamp' => now()->toISOString(),
+                'uptime' => $currentTime - $startTime,
+                'memory_usage' => memory_get_usage(true),
+                'peak_memory' => memory_get_peak_usage(true),
+            ];
 
-        return new StreamedResponse(function () use ($filters) {
-            // Set up the stream
-            $this->setupStream();
+            echo "data: " . json_encode($heartbeatData) . "\n\n";
+            flush();
+            
+            $lastHeartbeat = $currentTime;
+            $messageCount++;
 
-            // Get initial log entries if requested
-            if (request('include_recent', false)) {
-                $this->sendRecentLogs($filters);
-            }
+            \Log::debug('SSE heartbeat sent', ['count' => $messageCount]);
+        }
 
-            // Keep connection alive and listen for new logs
-            $this->maintainConnection();
-        }, 200, [
-            'Content-Type' => 'text/event-stream',
-            'Cache-Control' => 'no-cache',
-            'Connection' => 'keep-alive',
-            'Access-Control-Allow-Origin' => '*',
-            'Access-Control-Allow-Headers' => 'Cache-Control',
-            'X-Accel-Buffering' => 'no', // Disable nginx buffering
-        ]);
+        // Check for new log entries (simplified for testing)
+        if ($messageCount % 5 === 0 && $messageCount > 0) {
+            echo "data: " . json_encode([
+                'type' => 'sample_log',
+                'level' => 'info',
+                'message' => 'Sample log message for testing - ' . $messageCount,
+                'timestamp' => now()->toISOString(),
+            ]) . "\n\n";
+            flush();
+        }
+
+        // Break after 5 minutes for testing
+        if ($currentTime - $startTime > 300) {
+            echo "data: " . json_encode([
+                'type' => 'timeout',
+                'message' => 'Connection timeout for testing'
+            ]) . "\n\n";
+            flush();
+            break;
+        }
+
+        // Small delay
+        usleep(500000); // 0.5 seconds
     }
+
+    \Log::info('SSE connection ended', [
+        'duration' => time() - $startTime,
+        'messages_sent' => $messageCount
+    ]);
+}
+
+
+
+
+
+
+
+
+
+/**
+ * Flush output to client.
+ */
+protected function flushOutput(): void
+{
+    if (ob_get_level()) {
+        ob_flush();
+    }
+    flush();
+}
+
+/**
+ * Maintain the SSE connection with proper event handling.
+ */
+protected function maintainConnection(Request $request): void
+{
+    $lastHeartbeat = time();
+    $startTime = time();
+    
+    while (!connection_aborted()) {
+        // Check for connection timeout (10 minutes)
+        if (time() - $startTime > 600) {
+            echo "data: " . json_encode([
+                'type' => 'timeout',
+                'message' => 'Connection timeout, please reconnect'
+            ]) . "\n\n";
+            $this->flushOutput();
+            break;
+        }
+
+        // Send heartbeat every 30 seconds
+        if (time() - $lastHeartbeat >= 30) {
+            echo "data: " . json_encode([
+                'type' => 'heartbeat',
+                'timestamp' => now()->toISOString()
+            ]) . "\n\n";
+            $this->flushOutput();
+            $lastHeartbeat = time();
+        }
+
+        // Check for new log entries (polling approach)
+        $this->checkForNewLogs($request);
+
+        // Small sleep to prevent excessive CPU usage
+        usleep(500000); // 0.5 seconds
+    }
+}
+
+/**
+ * Check for new log entries and send them.
+ */
+protected function checkForNewLogs(Request $request): void
+{
+    static $lastLogId = null;
+    
+    if ($lastLogId === null) {
+        $lastLogId = LogEntry::max('id') ?? 0;
+        return;
+    }
+
+    $newLogs = LogEntry::where('id', '>', $lastLogId)
+        ->orderBy('id', 'asc')
+        ->limit(10)
+        ->get();
+
+    foreach ($newLogs as $log) {
+        $logData = [
+            'id' => $log->id,
+            'type' => 'log',
+            'timestamp' => $log->created_at->toISOString(),
+            'level' => $log->level,
+            'message' => $log->message,
+            'channel' => $log->channel,
+            'context' => json_decode($log->context, true) ?? [],
+        ];
+
+        echo "data: " . json_encode($logData) . "\n\n";
+        $this->flushOutput();
+        
+        $lastLogId = $log->id;
+    }
+}
+
+/**
+ * Send recent log entries for initial load.
+ */
+protected function sendRecentLogs(Request $request): void
+{
+    $query = LogEntry::query()
+        ->orderBy('created_at', 'desc')
+        ->limit(20);
+
+    // Apply filters from request
+    if ($request->has('level')) {
+        $levels = is_array($request->level) ? $request->level : [$request->level];
+        $query->whereIn('level', $levels);
+    }
+
+    $logs = $query->get()->reverse();
+
+    foreach ($logs as $log) {
+        $logData = [
+            'id' => $log->id,
+            'type' => 'log',
+            'timestamp' => $log->created_at->toISOString(),
+            'level' => $log->level,
+            'message' => $log->message,
+            'channel' => $log->channel,
+            'context' => json_decode($log->context, true) ?? [],
+        ];
+
+        echo "data: " . json_encode($logData) . "\n\n";
+        $this->flushOutput();
+    }
+}
+
 
     /**
      * Get log entries for initial load or pagination.
@@ -316,82 +614,7 @@ class LogStreamController extends Controller
         flush();
     }
 
-    /**
-     * Send recent log entries to newly connected clients.
-     */
-    protected function sendRecentLogs(array $filters): void
-    {
-        $query = LogEntry::query()
-            ->orderBy('created_at', 'desc')
-            ->limit(50);
-
-        // Apply filters
-        if (isset($filters['level'])) {
-            $query->whereIn('level', (array) $filters['level']);
-        }
-
-        if (isset($filters['channel'])) {
-            $query->where('channel', $filters['channel']);
-        }
-
-        $logs = $query->get();
-
-        foreach ($logs->reverse() as $log) {
-            $logData = [
-                'datetime' => $log->created_at->toISOString(),
-                'level' => $log->level,
-                'message' => $log->message,
-                'channel' => $log->channel,
-                'context' => json_decode($log->context, true) ?? [],
-            ];
-
-            echo $this->streamService->sendToStream($logData);
-
-            if (ob_get_level()) {
-                ob_flush();
-            }
-            flush();
-        }
-    }
-
-    /**
-     * Maintain the SSE connection.
-     */
-    protected function maintainConnection(): void
-    {
-        $lastHeartbeat = time();
-
-        while (true) {
-            // Check if client disconnected
-            if (connection_aborted()) {
-                break;
-            }
-
-            // Send heartbeat every 30 seconds
-            if (time() - $lastHeartbeat > 30) {
-                echo $this->streamService->sendHeartbeat();
-                $lastHeartbeat = time();
-
-                if (ob_get_level()) {
-                    ob_flush();
-                }
-                flush();
-            }
-
-            // Small delay to prevent excessive CPU usage
-            usleep(100000); // 0.1 seconds
-
-            // Break after 10 minutes to prevent memory leaks
-            if (time() - $_SERVER['REQUEST_TIME'] > 600) {
-                echo "data: " . json_encode([
-                    'type' => 'timeout',
-                    'message' => 'Connection timeout, please reconnect'
-                ]) . "\n\n";
-                break;
-            }
-        }
-    }
-
+ 
     /**
      * Get filters from request parameters.
      */

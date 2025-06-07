@@ -98,9 +98,9 @@ return [
             'alert',
             'critical',
             'error',
-            'warning',  // Add this
-            'notice',   // Add this
-            'info',
+            // 'warning',  
+            // 'notice',   
+            // 'info',
             // 'warning', // Uncomment to include warnings
         ],
 
