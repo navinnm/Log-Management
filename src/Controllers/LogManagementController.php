@@ -68,7 +68,7 @@ class LogManagementController extends Controller
         }
 
         $request->validate([
-            'channel' => 'required|string',
+            'channel' => 'string',
             'message' => 'string',
         ]);
 
@@ -89,6 +89,100 @@ class LogManagementController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to send test notification: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Test specific notification channel.
+     */
+    public function testNotificationChannel(Request $request, string $channel)
+    {
+        if (!$this->hasAccess($request)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        try {
+            $channels = $this->notifierService->getChannels();
+            
+            if (!isset($channels[$channel])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Channel '{$channel}' not found",
+                    'available_channels' => array_keys($channels)
+                ], 404);
+            }
+
+            $channelInstance = $channels[$channel];
+            
+            // Check if channel is enabled
+            if (!$channelInstance->isEnabled()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Channel '{$channel}' is not enabled"
+                ], 400);
+            }
+
+            // Validate channel configuration
+            if (!$channelInstance->validateConfiguration()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Channel '{$channel}' configuration is invalid",
+                    'requirements' => $channelInstance->getConfigurationRequirements()
+                ], 400);
+            }
+
+            // Test the channel
+            $testResult = $channelInstance->testConnection();
+
+            return response()->json([
+                'success' => $testResult['success'],
+                'message' => $testResult['message'],
+                'channel' => $channel,
+                'timestamp' => now()->toISOString()
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to test notification channel: ' . $e->getMessage(),
+                'channel' => $channel
+            ], 500);
+        }
+    }
+
+    /**
+     * Get available notification channels.
+     */
+    public function getNotificationChannels(Request $request)
+    {
+        if (!$this->hasAccess($request)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        try {
+            $channels = $this->notifierService->getChannels();
+            $channelInfo = [];
+
+            foreach ($channels as $name => $channel) {
+                $channelInfo[$name] = [
+                    'name' => $name,
+                    'enabled' => $channel->isEnabled(),
+                    'valid_config' => $channel->validateConfiguration(),
+                    'requirements' => $channel->getConfigurationRequirements(),
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'channels' => $channelInfo,
+                'total' => count($channelInfo)
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to get notification channels: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -136,6 +230,71 @@ class LogManagementController extends Controller
         return response()->json([
             'success' => true,
             'setting' => $notificationSetting,
+        ]);
+    }
+
+    /**
+     * Get configuration.
+     */
+    public function getConfiguration(Request $request)
+    {
+        if (!$this->hasAccess($request)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        return response()->json([
+            'success' => true,
+            'config' => [
+                'enabled' => config('log-management.enabled'),
+                'notifications' => [
+                    'enabled' => config('log-management.notifications.enabled'),
+                    'levels' => config('log-management.notifications.levels'),
+                    'channels' => config('log-management.notifications.channels'),
+                ],
+                'sse' => [
+                    'enabled' => config('log-management.sse.enabled'),
+                    'levels' => config('log-management.sse.levels'),
+                ],
+                'database' => [
+                    'enabled' => config('log-management.database.enabled'),
+                ],
+                'auth' => [
+                    'enabled' => config('log-management.auth.enabled'),
+                ],
+            ]
+        ]);
+    }
+
+    /**
+     * Update configuration.
+     */
+    public function updateConfiguration(Request $request)
+    {
+        if (!$this->hasAccess($request)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        // For security, only allow certain config updates
+        $allowedConfigs = [
+            'log-management.notifications.enabled',
+            'log-management.sse.enabled',
+            'log-management.database.enabled',
+        ];
+
+        $updatedConfigs = [];
+
+        foreach ($request->all() as $key => $value) {
+            $configKey = 'log-management.' . $key;
+            if (in_array($configKey, $allowedConfigs)) {
+                config([$configKey => $value]);
+                $updatedConfigs[$key] = $value;
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Configuration updated successfully',
+            'updated' => $updatedConfigs
         ]);
     }
 
@@ -217,6 +376,56 @@ class LogManagementController extends Controller
     }
 
     /**
+     * Handle Slack webhook actions.
+     */
+    public function handleSlackAction(Request $request)
+    {
+        // Handle Slack interactive components
+        $payload = json_decode($request->input('payload'), true);
+        
+        return response()->json(['text' => 'Action received']);
+    }
+
+    /**
+     * Ingest external log data.
+     */
+    public function ingestExternalLog(Request $request)
+    {
+        $request->validate([
+            'level' => 'required|string',
+            'message' => 'required|string',
+            'channel' => 'string',
+            'context' => 'array',
+        ]);
+
+        try {
+            LogEntry::create([
+                'level' => strtolower($request->level),
+                'message' => $request->message,
+                'channel' => $request->get('channel', 'external'),
+                'context' => json_encode($request->get('context', [])),
+                'extra' => json_encode([
+                    'source' => 'webhook',
+                    'ip' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                ]),
+                'created_at' => now(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Log ingested successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to ingest log: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Get system information.
      */
     public function systemInfo(Request $request)
@@ -226,7 +435,7 @@ class LogManagementController extends Controller
         }
 
         return response()->json([
-            'package_version' => '1.0.0', // This should be dynamic
+            'package_version' => '1.0.0',
             'laravel_version' => app()->version(),
             'php_version' => phpversion(),
             'environment' => app()->environment(),
@@ -256,7 +465,6 @@ class LogManagementController extends Controller
         $callback = function () use ($logs) {
             $file = fopen('php://output', 'w');
             
-            // Header row
             fputcsv($file, ['ID', 'Level', 'Message', 'Channel', 'Context', 'Created At']);
             
             foreach ($logs as $log) {
@@ -316,7 +524,6 @@ class LogManagementController extends Controller
             $user = auth()->user();
             $requiredPermission = config('log-management.auth.permission', 'manage-logs');
 
-            // If no specific permission method exists, allow authenticated users
             if (!method_exists($user, 'can')) {
                 return true;
             }
