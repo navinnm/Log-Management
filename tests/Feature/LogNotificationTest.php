@@ -218,9 +218,10 @@ class LogNotificationTest extends TestCase
         ]);
 
         // Send manual notification
-        LogManagement::notify('Manual notification test', 'error', [
-            'custom_data' => 'test_value',
-        ]);
+        // LogManagement::notify('Manual notification test', 'error', [
+        //     'custom_data' => 'test_value',
+        // ]);
+        LogManagement::notify('Test notification from Log Management Package', 'error', ['test' => true]);
 
         // Process queued jobs
         $this->artisan('queue:work', ['--once' => true]);

@@ -16,91 +16,88 @@ class EmailChannel implements NotificationChannelInterface
      */
     public function send(array $logData): bool
     {
-        try {
-            // Log attempt
-            Log::info('EmailChannel: Attempting to send email', [
-                'log_data' => $logData,
-                'config_check' => $this->getConfigurationStatus(),
-            ]);
+        \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - Full method entry', [
+            'log_data' => $logData,
+            'method' => 'send',
+            'timestamp' => now()->toISOString()
+        ]);
 
+        try {
             $setting = NotificationSetting::forChannel($this->name)->first();
             
-            // Log setting status
-            Log::info('EmailChannel: Notification setting status', [
-                'setting_exists' => $setting !== null,
-                'setting_enabled' => $setting ? $setting->enabled : false,
-                'log_data' => $logData,
+            \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - Setting retrieved', [
+                'setting_exists' => $setting ? true : false,
+                'setting_id' => $setting ? $setting->id : null,
+                'setting_enabled' => $setting ? $setting->enabled : null,
+                'setting_conditions' => $setting ? $setting->conditions : null,
+            ]);
+            
+            if (!$setting) {
+                \Illuminate\Support\Facades\Log::channel('single')->warning('EmailChannel: No notification setting found');
+                return false;
+            }
+
+            if (!$setting->enabled) {
+                \Illuminate\Support\Facades\Log::channel('single')->warning('EmailChannel: Setting is disabled');
+                return false;
+            }
+
+            // Check if should notify
+            $shouldNotify = $setting->shouldNotify($logData);
+            \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - Should notify check', [
+                'should_notify' => $shouldNotify,
+                'log_level' => $logData['level'],
+                'allowed_levels' => $setting->getCondition('levels', []),
+                'current_environment' => app()->environment(),
+                'allowed_environments' => $setting->getCondition('environments', []),
             ]);
 
-            // Create default setting if none exists and email is configured
-            if (!$setting && $this->hasValidConfiguration()) {
-                $setting = $this->createDefaultNotificationSetting();
-                Log::info('EmailChannel: Created default notification setting', [
-                    'setting' => $setting->toArray(),
-                ]);
-            }
-
-            if (!$setting) {
-                Log::warning('EmailChannel: No notification setting available and cannot create default');
-                return false;
-            }
-
-            // Check if notification should be sent based on setting conditions
-            if (!$setting->shouldNotify($logData)) {
-                Log::info('EmailChannel: Notification filtered out by setting conditions', [
+            if (!$shouldNotify) {
+                \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: Notification filtered out by setting conditions', [
                     'setting_conditions' => $setting->conditions,
-                    'log_data' => $logData,
+                    'log_data' => $logData
                 ]);
                 return false;
             }
 
+            // Get email configuration
             $to = $setting->getSetting('to') ?? config('log-management.notifications.channels.email.to');
             $from = $setting->getSetting('from') ?? config('log-management.notifications.channels.email.from', config('mail.from.address'));
             $fromName = $setting->getSetting('from_name') ?? config('log-management.notifications.channels.email.from_name', config('mail.from.name'));
 
+            \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - Email config', [
+                'to' => $to,
+                'from' => $from,
+                'from_name' => $fromName,
+            ]);
+
             if (!$to) {
-                Log::warning('EmailChannel: No recipient configured', [
-                    'setting_to' => $setting->getSetting('to'),
-                    'config_to' => config('log-management.notifications.channels.email.to'),
-                ]);
+                \Illuminate\Support\Facades\Log::channel('single')->warning('EmailChannel: No recipient configured');
                 return false;
             }
 
-            // Check if view exists, if not use a simple text email
-            $viewExists = view()->exists('log-management::emails.log-notification');
+            // Send email
+            \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - About to send email');
             
-            if ($viewExists) {
-                Mail::send('log-management::emails.log-notification', [
-                    'logData' => $logData,
-                    'level' => strtoupper($logData['level']),
-                    'setting' => $setting,
-                ], function ($message) use ($to, $from, $fromName, $logData, $setting) {
-                    $message->to($to)
-                        ->from($from, $fromName)
-                        ->subject($this->getSubject($logData, $setting));
-                });
-            } else {
-                // Fallback to simple text email
-                Mail::raw($this->getTextContent($logData), function ($message) use ($to, $from, $fromName, $logData, $setting) {
-                    $message->to($to)
-                        ->from($from, $fromName)
-                        ->subject($this->getSubject($logData, $setting));
-                });
-            }
+            Mail::send('log-management::emails.log-notification', [
+                'logData' => $logData,
+                'level' => strtoupper($logData['level']),
+                'setting' => $setting,
+            ], function ($message) use ($to, $from, $fromName, $logData, $setting) {
+                $message->to($to)
+                    ->from($from, $fromName)
+                    ->subject($this->getSubject($logData, $setting));
+            });
+
+            \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - Email sent successfully');
 
             $setting->markAsNotified();
             
-            Log::info('EmailChannel: Email sent successfully', [
-                'to' => $to,
-                'subject' => $this->getSubject($logData, $setting),
-            ]);
-            
             return true;
         } catch (\Exception $e) {
-            Log::error('EmailChannel: Failed to send email notification', [
+            \Illuminate\Support\Facades\Log::channel('single')->error('EmailChannel: DEBUG - Exception caught', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'log_data' => $logData,
+                'trace' => $e->getTraceAsString()
             ]);
             return false;
         }

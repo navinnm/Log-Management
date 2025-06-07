@@ -19,9 +19,12 @@ class LogNotifierService
      */
     public function notify(string $message, string $level = 'error', array $context = []): void
     {
+        // Ensure level is converted to lowercase for consistency
+        $level = strtolower($level);
+        
         $logData = [
             'message' => $message,
-            'level' => $level,
+            'level' => $level, // This should now be 'error' not 'info'
             'context' => $context,
             'timestamp' => now()->toISOString(),
             'environment' => app()->environment(),
@@ -29,6 +32,13 @@ class LogNotifierService
             'user_agent' => request()->userAgent() ?? 'N/A',
             'ip' => request()->ip() ?? 'N/A',
         ];
+
+        // Add debug log to see what level we're actually using
+        \Illuminate\Support\Facades\Log::channel('single')->info('LogNotifierService: Preparing to send notification', [
+            'message' => $message,
+            'level_parameter' => $level,
+            'log_data_level' => $logData['level'],
+        ]);
 
         foreach ($this->channels as $name => $channel) {
             if ($channel->isEnabled()) {
@@ -45,7 +55,7 @@ class LogNotifierService
                     $this->stats['notifications_failed']++;
                     
                     // Log the error but don't create a notification loop
-                    Log::channel('single')->error("Failed to send notification via {$name}: " . $e->getMessage());
+                    \Illuminate\Support\Facades\Log::channel('single')->error("Failed to send notification via {$name}: " . $e->getMessage());
                 }
             }
         }

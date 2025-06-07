@@ -93,11 +93,14 @@ return [
         | Available levels: emergency, alert, critical, error, warning, notice, info, debug
         |
         */
-        'levels' => [
+         'levels' => [
             'emergency',
             'alert',
             'critical',
             'error',
+            'warning',  // Add this
+            'notice',   // Add this
+            'info',
             // 'warning', // Uncomment to include warnings
         ],
 
