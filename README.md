@@ -1,648 +1,607 @@
-# Log Management Package for Laravel
+# Project Title
 
-A comprehensive Laravel package for log notification system and real-time log streaming using Server-Sent Events (SSE).
+[![Latest Version](https://img.shields.io/packagist/v/vendor/package.svg?style=flat-square)](https://packagist.org/packages/vendor/package)
+[![Total Downloads](https://img.shields.io/packagist/dt/vendor/package.svg?style=flat-square)](https://packagist.org/packages/vendor/package)
+[![License](https://img.shields.io/packagist/l/vendor/package.svg?style=flat-square)](https://packagist.org/packages/vendor/package)
+[![Tests](https://github.com/vendor/package/workflows/tests/badge.svg)](https://github.com/vendor/package/actions)
 
-## Features
+A brief, compelling description of what your package does. Keep it under 160 characters for better GitHub display.
 
-- **Real-time Log Streaming**: Stream logs in real-time using Server-Sent Events (SSE)
-- **Multiple Notification Channels**: Email, Slack, and Webhook notifications
-- **Configurable Log Levels**: Set which log levels trigger notifications
-- **Rate Limiting**: Prevent notification spam with built-in rate limiting
-- **Database Storage**: Optional database storage for log entries with auto-cleanup
-- **Dashboard Interface**: Web interface for viewing and managing logs
-- **REST API**: Full REST API for log management and integration
-- **Authentication & Security**: API keys, IP whitelisting, and permission-based access
-- **Extensible Architecture**: Easy to add custom notification channels and filters
-- **Async Processing**: Optional async processing for better performance
-- **Integration Support**: Built-in support for Sentry, Bugsnag, and New Relic
+## ✨ Features
 
-## Installation
+- 🚀 **Feature One**: Brief description of key feature
+- 📡 **Feature Two**: Another important feature
+- 🎛️ **Feature Three**: Third key feature
+- 🔧 **Feature Four**: Additional feature
+- 💾 **Feature Five**: Another capability
+- 🔍 **Feature Six**: Final key feature
 
-### Step 1: Install the Package
+## 📋 Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [API Reference](#api-reference)
+- [Advanced Features](#advanced-features)
+- [Testing](#testing)
+- [Contributing](#contributing)
+- [License](#license)
+
+## 🚀 Installation
+
+### Requirements
+
+- PHP 8.0+
+- Laravel 9.0+
+- Required extensions or dependencies
+
+### Via Composer
 
 ```bash
-composer require fulgid/log-management
+composer require vendor/package-name
 ```
 
-### Step 2: Publish Configuration and Assets
+### Publish Assets & Run Setup
 
 ```bash
-# Publish the configuration file
-php artisan vendor:publish --provider="Fulgid\LogManagement\LogManagementServiceProvider" --tag="log-management-config"
+# Publish configuration
+php artisan vendor:publish --provider="Vendor\Package\ServiceProvider" --tag="config"
 
-# Publish views (optional)
-php artisan vendor:publish --provider="Fulgid\LogManagement\LogManagementServiceProvider" --tag="log-management-views"
-```
-
-### Step 3: Run Migrations
-
-```bash
+# Run migrations (if applicable)
 php artisan migrate
+
+# Install package
+php artisan package:install
 ```
 
-### Step 4: Install Package (Optional Command)
+## ⚡ Quick Start
 
-```bash
-php artisan log-management:install
-```
-
-## Configuration
-
-The package configuration file is published to `config/log-management.php`. Here are the key configuration options:
-
-### Basic Configuration
+Here's how to get started in 30 seconds:
 
 ```php
-// Enable/disable the package
-'enabled' => env('LOG_MANAGEMENT_ENABLED', true),
+// Basic usage example
+use Vendor\Package\Facade;
 
-// Environments where the package should be active
-'environments' => [
-    'production',
-    'staging',
-    // 'local', // Uncomment for local development
-],
+// Simple operation
+Facade::doSomething('parameter');
+
+// Get results
+$result = Facade::getResults();
 ```
-
-### Database Configuration
-
-```php
-'database' => [
-    'enabled' => env('LOG_MANAGEMENT_DATABASE_ENABLED', true),
-    'table_name' => 'log_entries',
-    'auto_cleanup' => [
-        'enabled' => env('LOG_MANAGEMENT_AUTO_CLEANUP_ENABLED', true),
-        'retention_days' => env('LOG_MANAGEMENT_RETENTION_DAYS', 30),
-        'cleanup_frequency' => 'daily',
-    ],
-],
-```
-
-### Rate Limiting
-
-```php
-'rate_limit' => [
-    'enabled' => env('LOG_MANAGEMENT_RATE_LIMIT_ENABLED', true),
-    'max_per_minute' => env('LOG_MANAGEMENT_RATE_LIMIT_MAX', 10),
-    'cache_driver' => env('LOG_MANAGEMENT_RATE_LIMIT_CACHE', 'default'),
-],
-```
-
-## Environment Variables
-
-Add these environment variables to your `.env` file:
-
-### Basic Settings
-
-```env
-# Package Settings
-LOG_MANAGEMENT_ENABLED=true
-LOG_MANAGEMENT_DATABASE_ENABLED=true
-LOG_MANAGEMENT_NOTIFICATIONS_ENABLED=true
-
-# Rate Limiting
-LOG_MANAGEMENT_RATE_LIMIT_ENABLED=true
-LOG_MANAGEMENT_RATE_LIMIT_MAX=10
-
-# Auto Cleanup
-LOG_MANAGEMENT_AUTO_CLEANUP_ENABLED=true
-LOG_MANAGEMENT_RETENTION_DAYS=30
-```
-
-### Email Notifications
-
-```env
-LOG_MANAGEMENT_EMAIL_ENABLED=true
-LOG_MANAGEMENT_EMAIL_TO=admin@yoursite.com
-LOG_MANAGEMENT_EMAIL_FROM=noreply@yoursite.com
-LOG_MANAGEMENT_EMAIL_FROM_NAME="Log Management"
-LOG_MANAGEMENT_EMAIL_SUBJECT_PREFIX="[LOG ALERT]"
-```
-
-### Slack Notifications
-
-```env
-LOG_MANAGEMENT_SLACK_ENABLED=true
-LOG_MANAGEMENT_SLACK_WEBHOOK=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
-LOG_MANAGEMENT_SLACK_CHANNEL=#alerts
-LOG_MANAGEMENT_SLACK_USERNAME="Log Management"
-LOG_MANAGEMENT_SLACK_ICON_EMOJI=:warning:
-```
-
-### Webhook Notifications
-
-```env
-LOG_MANAGEMENT_WEBHOOK_ENABLED=true
-LOG_MANAGEMENT_WEBHOOK_URL=https://your-webhook-url.com/endpoint
-LOG_MANAGEMENT_WEBHOOK_METHOD=POST
-LOG_MANAGEMENT_WEBHOOK_TIMEOUT=10
-LOG_MANAGEMENT_WEBHOOK_AUTH_TYPE=bearer
-LOG_MANAGEMENT_WEBHOOK_AUTH_TOKEN=your-auth-token
-```
-
-### Server-Sent Events (SSE)
-
-```env
-LOG_MANAGEMENT_SSE_ENABLED=true
-LOG_MANAGEMENT_SSE_MAX_CONNECTIONS=100
-```
-
-### Dashboard & API
-
-```env
-LOG_MANAGEMENT_DASHBOARD_ENABLED=true
-LOG_MANAGEMENT_API_ENABLED=true
-LOG_MANAGEMENT_AUTH_ENABLED=true
-LOG_MANAGEMENT_API_KEY_1=your-api-key-1
-LOG_MANAGEMENT_API_KEY_2=your-api-key-2
-```
-
-## Usage
-
-### Basic Logging
-
-The package automatically captures all Laravel logs. Simply use Laravel's logging as usual:
-
-```php
-use Illuminate\Support\Facades\Log;
-
-// These will be captured and processed by the package
-Log::error('Something went wrong!', ['user_id' => 123]);
-Log::critical('Database connection failed');
-Log::warning('API rate limit approaching');
-Log::info('User logged in', ['user' => $user->email]);
-```
-
-### Dashboard Access
-
-Access the log management dashboard at:
-```
-https://yoursite.com/log-management
-```
-
-### Real-time Log Streaming
-
-Access real-time logs via Server-Sent Events:
-```
-https://yoursite.com/log-management/stream
-```
-
-### API Endpoints
-
-#### Get Logs
-```bash
-# Get paginated logs
-GET /log-management/api/logs
-
-# Filter by level
-GET /log-management/api/logs?level=error
-
-# Filter by date range
-GET /log-management/api/logs?from=2024-01-01&to=2024-01-31
-
-# Search in messages
-GET /log-management/api/logs?search=database
-```
-
-#### Get Log Statistics
-```bash
-GET /log-management/api/stats
-```
-
-#### Export Logs
-```bash
-# Export as JSON
-GET /log-management/api/export?format=json
-
-# Export as CSV
-GET /log-management/api/export?format=csv
-```
-
-### Authentication
-
-#### API Key Authentication
-
-Include the API key in your requests:
 
 ```bash
-# Header authentication
-curl -H "X-Log-Management-Key: your-api-key" https://yoursite.com/log-management/api/logs
-
-# Query parameter authentication
-curl https://yoursite.com/log-management/api/logs?api_key=your-api-key
+# Command line usage
+php artisan package:command --option=value
 ```
 
-#### User Permission
+## ⚙️ Configuration
 
-For web dashboard access, ensure users have the required permission:
+### Environment Variables
 
-```php
-// In your User model or permission system
-$user->givePermissionTo('view-logs');
+Add these to your `.env` file:
+
+```env
+# Core Settings
+PACKAGE_ENABLED=true
+PACKAGE_DEBUG=false
+
+# API Configuration
+PACKAGE_API_KEY=your_api_key_here
+PACKAGE_API_URL=https://api.example.com
+
+# Feature Toggles
+PACKAGE_FEATURE_ONE=true
+PACKAGE_FEATURE_TWO=false
+
+# Advanced Settings
+PACKAGE_TIMEOUT=30
+PACKAGE_RETRY_ATTEMPTS=3
 ```
 
-## Customization
+### Configuration File
 
-### Custom Notification Channels
-
-Create a custom notification channel:
+The config file `config/package.php` provides detailed options:
 
 ```php
 <?php
 
-namespace App\LogManagement\Channels;
-
-use Fulgid\LogManagement\Contracts\NotificationChannelInterface;
-
-class DiscordChannel implements NotificationChannelInterface
-{
-    public function send(array $logData): bool
-    {
-        // Implement Discord webhook logic
-        return true;
-    }
-
-    public function isEnabled(): bool
-    {
-        return config('log-management.custom_channels.discord.enabled', false);
-    }
-}
-```
-
-Register in `config/log-management.php`:
-
-```php
-'custom_channels' => [
-    'discord' => App\LogManagement\Channels\DiscordChannel::class,
-],
-```
-
-### Custom Filters
-
-Create a custom filter:
-
-```php
-<?php
-
-namespace App\LogManagement\Filters;
-
-use Fulgid\LogManagement\Contracts\FilterInterface;
-
-class CustomFilter implements FilterInterface
-{
-    public function filter(array $logData): bool
-    {
-        // Return true to process the log, false to skip
-        return !str_contains($logData['message'], 'ignore this');
-    }
-}
-```
-
-Register in `config/log-management.php`:
-
-```php
-'custom_filters' => [
-    App\LogManagement\Filters\CustomFilter::class,
-],
-```
-
-### Frontend Integration
-
-#### JavaScript SSE Client
-
-```html
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Real-time Logs</title>
-</head>
-<body>
-    <div id="logs"></div>
-
-    <script>
-        const eventSource = new EventSource('/log-management/stream?api_key=your-api-key');
-        const logsDiv = document.getElementById('logs');
-
-        eventSource.onmessage = function(event) {
-            const logData = JSON.parse(event.data);
-            const logElement = document.createElement('div');
-            logElement.innerHTML = `
-                <strong>${logData.level}</strong> 
-                [${logData.datetime}] 
-                ${logData.message}
-            `;
-            logElement.className = `log-${logData.level}`;
-            logsDiv.insertBefore(logElement, logsDiv.firstChild);
-        };
-
-        eventSource.onerror = function(event) {
-            console.error('SSE connection error:', event);
-        };
-    </script>
-
-    <style>
-        .log-error { color: red; }
-        .log-warning { color: orange; }
-        .log-info { color: blue; }
-        .log-debug { color: gray; }
-    </style>
-</body>
-</html>
-```
-
-#### React Component Example
-
-```jsx
-import React, { useState, useEffect } from 'react';
-
-const LogStream = () => {
-    const [logs, setLogs] = useState([]);
-
-    useEffect(() => {
-        const eventSource = new EventSource('/log-management/stream?api_key=your-api-key');
-
-        eventSource.onmessage = (event) => {
-            const logData = JSON.parse(event.data);
-            setLogs(prevLogs => [logData, ...prevLogs.slice(0, 99)]); // Keep last 100 logs
-        };
-
-        return () => {
-            eventSource.close();
-        };
-    }, []);
-
-    return (
-        <div className="log-stream">
-            <h2>Real-time Logs</h2>
-            {logs.map((log, index) => (
-                <div key={index} className={`log-entry log-${log.level}`}>
-                    <span className="log-time">{log.datetime}</span>
-                    <span className="log-level">{log.level.toUpperCase()}</span>
-                    <span className="log-message">{log.message}</span>
-                </div>
-            ))}
-        </div>
-    );
-};
-
-export default LogStream;
-```
-
-## Artisan Commands
-
-### Install Command
-```bash
-php artisan log-management:install [--force]
-```
-
-### Test Notifications
-```bash
-php artisan log-management:test [--channel=email] [--level=error]
-```
-
-### Clean Old Logs
-```bash
-php artisan log-management:cleanup [--days=30]
-```
-
-### Generate API Key
-```bash
-php artisan log-management:generate-key
-```
-
-## Performance Optimization
-
-### Async Processing
-
-Enable async processing for better performance:
-
-```env
-LOG_MANAGEMENT_ASYNC_PROCESSING=true
-LOG_MANAGEMENT_BATCH_SIZE=100
-```
-
-### Queue Configuration
-
-Configure queue for notifications:
-
-```env
-LOG_MANAGEMENT_NOTIFICATIONS_QUEUE=log-notifications
-```
-
-Set up a dedicated queue worker:
-
-```bash
-php artisan queue:work --queue=log-notifications
-```
-
-### Memory Management
-
-```env
-LOG_MANAGEMENT_MEMORY_LIMIT=256M
-LOG_MANAGEMENT_TIME_LIMIT=60
-```
-
-## Security Considerations
-
-### IP Whitelisting
-
-```php
-'auth' => [
-    'ip_whitelist' => [
-        '127.0.0.1',
-        '192.168.1.0/24',
-        '10.0.0.*',
+return [
+    'enabled' => env('PACKAGE_ENABLED', true),
+    
+    'api' => [
+        'key' => env('PACKAGE_API_KEY'),
+        'url' => env('PACKAGE_API_URL', 'https://api.example.com'),
+        'timeout' => env('PACKAGE_TIMEOUT', 30),
     ],
-],
+    
+    'features' => [
+        'feature_one' => env('PACKAGE_FEATURE_ONE', true),
+        'feature_two' => env('PACKAGE_FEATURE_TWO', false),
+    ],
+    
+    'advanced' => [
+        'retry_attempts' => env('PACKAGE_RETRY_ATTEMPTS', 3),
+        'batch_size' => 100,
+        'cache_ttl' => 3600,
+    ],
+];
 ```
 
-### API Key Security
+## 📖 Usage
 
-- Store API keys securely in environment variables
-- Rotate API keys regularly
-- Use different keys for different applications/environments
-- Monitor API key usage
+### Basic Operations
 
-### Rate Limiting
+```php
+use Vendor\Package\Facade;
 
-The package includes built-in rate limiting to prevent abuse:
+// Simple usage
+$result = Facade::process($data);
 
-```env
-LOG_MANAGEMENT_RATE_LIMIT_MAX=10  # Maximum notifications per minute
+// With options
+$result = Facade::process($data, [
+    'option1' => 'value1',
+    'option2' => 'value2',
+]);
+
+// Async processing
+Facade::processAsync($data)->then(function ($result) {
+    // Handle success
+})->catch(function ($error) {
+    // Handle error
+});
 ```
 
-## Troubleshooting
+### Advanced Usage
+
+```php
+// Custom configuration
+$service = new Service([
+    'custom_option' => 'value',
+    'another_option' => true,
+]);
+
+// Chaining operations
+$result = $service
+    ->setOption('key', 'value')
+    ->addFilter('type', 'active')
+    ->process()
+    ->getResults();
+
+// Event handling
+$service->on('completed', function ($result) {
+    Log::info('Processing completed', ['result' => $result]);
+});
+```
+
+### Real-time Features
+
+```javascript
+// Frontend integration
+const client = new PackageClient({
+    apiKey: 'your_api_key',
+    endpoint: '/api/package'
+});
+
+// Real-time updates
+client.subscribe('updates', (data) => {
+    console.log('New update:', data);
+    updateUI(data);
+});
+
+// Send data
+client.send('action', {
+    key: 'value',
+    timestamp: Date.now()
+});
+```
+
+## 🔌 API Reference
+
+### HTTP Endpoints
+
+#### Get Resources
+
+```http
+GET /api/package/resources
+```
+
+**Parameters:**
+- `page` (int): Page number (default: 1)
+- `per_page` (int): Items per page (max: 100)
+- `filter` (string): Filter criteria
+- `sort` (string): Sort field
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "name": "Resource Name",
+      "status": "active",
+      "created_at": "2024-01-15T10:30:00Z"
+    }
+  ],
+  "meta": {
+    "current_page": 1,
+    "last_page": 5,
+    "per_page": 20,
+    "total": 95
+  }
+}
+```
+
+#### Create Resource
+
+```http
+POST /api/package/resources
+```
+
+**Body:**
+
+```json
+{
+  "name": "New Resource",
+  "description": "Resource description",
+  "options": {
+    "key": "value"
+  }
+}
+```
+
+### PHP API
+
+#### Service Class
+
+```php
+use Vendor\Package\Services\PackageService;
+
+$service = new PackageService();
+
+// Get all items
+$items = $service->getAll();
+
+// Get specific item
+$item = $service->find($id);
+
+// Create new item
+$item = $service->create([
+    'name' => 'Item Name',
+    'data' => ['key' => 'value']
+]);
+
+// Update item
+$service->update($id, ['name' => 'Updated Name']);
+
+// Delete item
+$service->delete($id);
+```
+
+#### Facade Methods
+
+```php
+use Vendor\Package\Facade;
+
+// Quick operations
+Facade::process($data);
+Facade::validate($input);
+Facade::transform($data, $rules);
+
+// Batch operations
+Facade::processBatch($items);
+Facade::validateBatch($inputs);
+
+// Utility methods
+Facade::status();
+Facade::version();
+Facade::health();
+```
+
+## 🎯 Advanced Features
+
+### Custom Processors
+
+Create custom processors for specific needs:
+
+```php
+use Vendor\Package\Contracts\ProcessorInterface;
+
+class CustomProcessor implements ProcessorInterface
+{
+    public function process($data): array
+    {
+        // Custom processing logic
+        return $processedData;
+    }
+    
+    public function supports($data): bool
+    {
+        return $data['type'] === 'custom';
+    }
+}
+
+// Register processor
+app(ProcessorManager::class)->register('custom', new CustomProcessor());
+```
+
+### Event Listeners
+
+Listen to package events:
+
+```php
+use Vendor\Package\Events\ProcessingCompleted;
+
+// In EventServiceProvider
+protected $listen = [
+    ProcessingCompleted::class => [
+        SendNotification::class,
+        LogActivity::class,
+    ],
+];
+
+// Custom listener
+class SendNotification
+{
+    public function handle(ProcessingCompleted $event)
+    {
+        // Send notification logic
+        Mail::to($event->user)->send(new ProcessingComplete($event->result));
+    }
+}
+```
+
+### Middleware
+
+Add custom middleware:
+
+```php
+// Custom middleware
+class PackageMiddleware
+{
+    public function handle($request, Closure $next)
+    {
+        if (!$this->isAuthorized($request)) {
+            abort(403, 'Unauthorized');
+        }
+        
+        return $next($request);
+    }
+}
+
+// Register in routes
+Route::middleware(['package-auth'])->group(function () {
+    Route::get('/package/dashboard', [DashboardController::class, 'index']);
+});
+```
+
+## 🧪 Testing
+
+### Running Tests
+
+```bash
+# Run all tests
+composer test
+
+# Run specific test suite
+./vendor/bin/phpunit tests/Unit/
+./vendor/bin/phpunit tests/Feature/
+
+# Run with coverage
+composer test:coverage
+
+# Run static analysis
+composer analyze
+```
+
+### Test Configuration
+
+```bash
+# Copy test environment
+cp .env.testing.example .env.testing
+
+# Set test database
+php artisan config:clear --env=testing
+php artisan migrate --env=testing
+```
+
+### Example Tests
+
+```php
+use Tests\TestCase;
+use Vendor\Package\Facade;
+
+class PackageTest extends TestCase
+{
+    /** @test */
+    public function it_can_process_data()
+    {
+        $data = ['key' => 'value'];
+        
+        $result = Facade::process($data);
+        
+        $this->assertArrayHasKey('processed', $result);
+        $this->assertEquals('value', $result['processed']['key']);
+    }
+    
+    /** @test */
+    public function it_validates_input()
+    {
+        $this->expectException(ValidationException::class);
+        
+        Facade::process(['invalid' => 'data']);
+    }
+}
+```
+
+## 🛠️ Commands
+
+### Available Commands
+
+```bash
+# Installation
+php artisan package:install [options]
+
+# Testing
+php artisan package:test [--channel=] [--all]
+
+# Maintenance
+php artisan package:cleanup [--days=30] [--dry-run]
+
+# Status
+php artisan package:status
+php artisan package:health-check
+```
+
+### Command Examples
+
+```bash
+# Install with options
+php artisan package:install --force --skip-migrations
+
+# Test specific features
+php artisan package:test --feature=notifications
+php artisan package:test --all
+
+# Cleanup old data
+php artisan package:cleanup --days=7 --dry-run
+php artisan package:cleanup --force
+
+# Check system status
+php artisan package:status
+```
+
+## 🐛 Troubleshooting
 
 ### Common Issues
 
-#### 1. SSE Connection Issues
+#### Issue 1: Configuration Not Found
 
 ```bash
-# Check if SSE endpoint is accessible
-curl -H "Accept: text/event-stream" https://yoursite.com/log-management/stream
+# Clear caches
+php artisan config:clear
+php artisan cache:clear
+
+# Republish config
+php artisan vendor:publish --provider="Vendor\Package\ServiceProvider" --force
 ```
 
-#### 2. Notification Not Sending
+#### Issue 2: Database Connection Issues
 
 ```bash
-# Test notifications manually
-php artisan log-management:test --channel=email --level=error
+# Check database connection
+php artisan package:health-check
+
+# Run migrations
+php artisan migrate
+
+# Reset database
+php artisan migrate:fresh
 ```
 
-#### 3. Database Connection Issues
+#### Issue 3: API Authentication Issues
+
+1. Verify API key format
+2. Check environment variables
+3. Test with curl:
 
 ```bash
-# Check if migration ran successfully
-php artisan migrate:status | grep log_entries
-```
-
-#### 4. Permission Denied
-
-```bash
-# Check if user has required permission
-php artisan tinker
->>> auth()->user()->hasPermissionTo('view-logs')
+curl -H "Authorization: Bearer your_api_key" \
+     https://yourapp.com/api/package/test
 ```
 
 ### Debug Mode
 
-Enable debug mode for detailed logging:
+Enable detailed debugging:
 
 ```env
-LOG_MANAGEMENT_DEBUG=true
-LOG_MANAGEMENT_VERBOSE_ERRORS=true
+PACKAGE_DEBUG=true
+PACKAGE_LOG_LEVEL=debug
+APP_DEBUG=true
 ```
 
-### Log Files
+### Support
 
-Check these log files for debugging:
+- 📧 **Email**: support@example.com
+- 🐛 **Issues**: [GitHub Issues](https://github.com/vendor/package/issues)
+- 📖 **Documentation**: [Full Docs](https://docs.example.com)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/vendor/package/discussions)
 
-- `storage/logs/laravel.log` - General Laravel logs
-- `storage/logs/log-management.log` - Package-specific logs (if enabled)
+## 🤝 Contributing
 
-## Integration Examples
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
-### Slack Integration
-
-Set up a Slack webhook:
-
-1. Go to your Slack workspace settings
-2. Create a new webhook for your channel
-3. Add the webhook URL to your `.env`:
-
-```env
-LOG_MANAGEMENT_SLACK_ENABLED=true
-LOG_MANAGEMENT_SLACK_WEBHOOK=https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX
-LOG_MANAGEMENT_SLACK_CHANNEL=#alerts
-```
-
-### Discord Integration (Custom Channel)
-
-```php
-<?php
-
-namespace App\LogManagement\Channels;
-
-use Fulgid\LogManagement\Contracts\NotificationChannelInterface;
-use Illuminate\Support\Facades\Http;
-
-class DiscordChannel implements NotificationChannelInterface
-{
-    public function send(array $logData): bool
-    {
-        $webhookUrl = config('log-management.custom_channels.discord.webhook_url');
-        
-        if (!$webhookUrl) {
-            return false;
-        }
-
-        $response = Http::post($webhookUrl, [
-            'content' => $this->formatMessage($logData),
-            'embeds' => [
-                [
-                    'title' => "Log Alert: {$logData['level']}",
-                    'description' => $logData['message'],
-                    'color' => $this->getColorForLevel($logData['level']),
-                    'timestamp' => $logData['datetime'],
-                ]
-            ]
-        ]);
-
-        return $response->successful();
-    }
-
-    private function formatMessage(array $logData): string
-    {
-        return "🚨 **{$logData['level']}** alert from " . config('app.name');
-    }
-
-    private function getColorForLevel(string $level): int
-    {
-        return match($level) {
-            'emergency', 'alert', 'critical' => 0xFF0000, // Red
-            'error' => 0xFF6600, // Orange
-            'warning' => 0xFFFF00, // Yellow
-            'notice', 'info' => 0x0099FF, // Blue
-            default => 0x999999, // Gray
-        };
-    }
-
-    public function isEnabled(): bool
-    {
-        return config('log-management.custom_channels.discord.enabled', false);
-    }
-}
-```
-
-## Testing
-
-### Unit Tests
+### Development Setup
 
 ```bash
-# Run package tests
-vendor/bin/phpunit vendor/fulgid/log-management/tests
+# Clone repository
+git clone https://github.com/vendor/package.git
+cd package
 
-# Run specific test
-vendor/bin/phpunit vendor/fulgid/log-management/tests/Unit/NotificationTest.php
+# Install dependencies
+composer install
+npm install
+
+# Set up environment
+cp .env.example .env
+php artisan key:generate
+
+# Run tests
+composer test
 ```
 
-### Feature Tests
+### Contribution Guidelines
+
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
+
+### Code Standards
 
 ```bash
-# Test SSE streaming
-vendor/bin/phpunit vendor/fulgid/log-management/tests/Feature/SseStreamingTest.php
+# Format code
+composer format
 
-# Test API endpoints
-vendor/bin/phpunit vendor/fulgid/log-management/tests/Feature/ApiTest.php
+# Run static analysis
+composer analyze
+
+# Check code style
+composer check-style
 ```
 
-## Contributing
+## 📄 License
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
 
-## Changelog
+## 🙏 Credits
 
-See [CHANGELOG.md](CHANGELOG.md) for a list of changes.
+- **Author**: [Your Name](https://github.com/yourusername)
+- **Contributors**: [All Contributors](../../contributors)
+- **Inspiration**: Thanks to the Laravel community
 
-## License
+## 📈 Changelog
 
-This package is open-source software licensed under the [MIT License](LICENSE).
+Please see [CHANGELOG.md](CHANGELOG.md) for more information on what has changed recently.
 
-## Support
+## 🔒 Security
 
-- **Documentation**: [GitHub Wiki](https://github.com/navinnm/log-management/wiki)
-- **Issues**: [GitHub Issues](https://github.com/navinnm/log-management/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/navinnm/log-management/discussions)
+If you discover any security-related issues, please email security@example.com instead of using the issue tracker.
 
-## Credits
+## 📊 Stats
 
-- **Author**: Fulgid
-- **Contributors**: [All Contributors](https://github.com/navinnm/log-management/contributors)
+- **Downloads**: ![Downloads](https://img.shields.io/packagist/dt/vendor/package)
+- **Stars**: ![Stars](https://img.shields.io/github/stars/vendor/package)
+- **Forks**: ![Forks](https://img.shields.io/github/forks/vendor/package)
 
 ---
 
-**Made with ❤️ for the Laravel community**
+**Made with ❤️ by [Your Company](https://yourcompany.com)**
+
+If this package helped you, please consider:
+- ⭐ Starring the [repository](https://github.com/vendor/package)
+- 🐛 [Reporting issues](https://github.com/vendor/package/issues)
+- 💡 [Suggesting features](https://github.com/vendor/package/discussions)
+- ☕ [Buy me a coffee](https://buymeacoffee.com/yourusername)
