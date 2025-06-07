@@ -70,6 +70,8 @@ class LogManagementServiceProvider extends ServiceProvider
                 LogManagementInstallCommand::class,
                 LogManagementTestCommand::class,
                 LogManagementCleanupCommand::class,
+                \Fulgid\LogManagement\Commands\LogManagementTestNotificationCommand::class,
+
             ]);
         }
 

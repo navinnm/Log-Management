@@ -17,72 +17,44 @@ class EmailChannel implements NotificationChannelInterface
     public function send(array $logData): bool
     {
         try {
-            Log::info('EmailChannel: DEBUG - Full method entry', [
-                'log_data' => $logData,
-                'method' => 'send',
-                'timestamp' => now()->toISOString()
-            ]);
-
-            // Get setting from database or use configuration fallback
             $setting = NotificationSetting::forChannel($this->name)->first();
             
-            Log::info('EmailChannel: DEBUG - Setting retrieved', [
-                'setting_exists' => $setting !== null,
-                'setting_id' => $setting?->id,
-                'setting_enabled' => $setting?->enabled,
-                'setting_conditions' => $setting?->conditions,
-            ]);
-
-            // Check if channel is enabled (database setting or config)
-            if (!$this->isChannelEnabled($setting)) {
-                Log::warning('EmailChannel: Channel disabled');
-                return false;
+            // Create setting if it doesn't exist
+            if (!$setting) {
+                $setting = NotificationSetting::create([
+                    'channel' => $this->name,
+                    'enabled' => config('log-management.notifications.channels.email.enabled', false),
+                    'settings' => NotificationSetting::getDefaultSettings($this->name),
+                ]);
             }
-
-            // Check conditions if setting exists
-            if ($setting && !$setting->shouldNotify($logData)) {
-                Log::warning('EmailChannel: Conditions not met for notification');
-                return false;
-            }
-
-            // Get email configuration
-            $emailConfig = $this->getEmailConfiguration($setting);
             
-            if (!$emailConfig['to']) {
-                Log::warning('EmailChannel: No recipient configured', $emailConfig);
+            if (!$setting->shouldNotify($logData)) {
                 return false;
             }
 
-            Log::info('EmailChannel: DEBUG - Email config', $emailConfig);
+            $to = $setting->getSetting('to') ?? config('log-management.notifications.channels.email.to');
+            $from = $setting->getSetting('from') ?? config('log-management.notifications.channels.email.from', config('mail.from.address'));
+            $fromName = $setting->getSetting('from_name') ?? config('log-management.notifications.channels.email.from_name', config('mail.from.name'));
 
-            // Send email
+            if (!$to) {
+                Log::channel('single')->warning('Email notification skipped: No recipient configured');
+                return false;
+            }
+
             Mail::send('log-management::emails.log-notification', [
                 'logData' => $logData,
                 'level' => strtoupper($logData['level']),
                 'setting' => $setting,
-            ], function ($message) use ($emailConfig, $logData, $setting) {
-                $message->to($emailConfig['to'])
-                    ->from($emailConfig['from'], $emailConfig['from_name'])
+            ], function ($message) use ($to, $from, $fromName, $logData, $setting) {
+                $message->to($to)
+                    ->from($from, $fromName)
                     ->subject($this->getSubject($logData, $setting));
             });
 
-            // Mark as notified if setting exists
-            if ($setting) {
-                $setting->markAsNotified();
-            }
-
-            Log::info('EmailChannel: Email sent successfully', [
-                'to' => $emailConfig['to'],
-                'subject' => $this->getSubject($logData, $setting),
-            ]);
-            
+            // Don't call markAsNotified here - let the service handle stats
             return true;
         } catch (\Exception $e) {
-            Log::error('EmailChannel: Failed to send email notification', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'log_data' => $logData,
-            ]);
+            Log::channel('single')->error('Failed to send email notification: ' . $e->getMessage());
             return false;
         }
     }
