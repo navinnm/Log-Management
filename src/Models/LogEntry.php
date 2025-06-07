@@ -19,15 +19,37 @@ class LogEntry extends Model
         'channel',
         'context',
         'extra',
+        'environment',
+        'user_id',
+        'session_id',
+        'request_id',
+        'ip_address',
+        'user_agent',
+        'url',
+        'method',
+        'status_code',
+        'execution_time',
+        'memory_usage',
+        'file_path',
+        'line_number',
+        'stack_trace',
+        'tags',
         'created_at',
     ];
 
     protected $casts = [
         'context' => 'array',
         'extra' => 'array',
+        'tags' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+        'execution_time' => 'float',
+        'memory_usage' => 'integer',
+        'status_code' => 'integer',
+        'line_number' => 'integer',
     ];
+
+
 
     protected $attributes = [
         'context' => '{}',
