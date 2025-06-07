@@ -16,91 +16,115 @@ class EmailChannel implements NotificationChannelInterface
      */
     public function send(array $logData): bool
     {
-        \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - Full method entry', [
-            'log_data' => $logData,
-            'method' => 'send',
-            'timestamp' => now()->toISOString()
-        ]);
-
         try {
+            Log::info('EmailChannel: DEBUG - Full method entry', [
+                'log_data' => $logData,
+                'method' => 'send',
+                'timestamp' => now()->toISOString()
+            ]);
+
+            // Get setting from database or use configuration fallback
             $setting = NotificationSetting::forChannel($this->name)->first();
             
-            \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - Setting retrieved', [
-                'setting_exists' => $setting ? true : false,
-                'setting_id' => $setting ? $setting->id : null,
-                'setting_enabled' => $setting ? $setting->enabled : null,
-                'setting_conditions' => $setting ? $setting->conditions : null,
+            Log::info('EmailChannel: DEBUG - Setting retrieved', [
+                'setting_exists' => $setting !== null,
+                'setting_id' => $setting?->id,
+                'setting_enabled' => $setting?->enabled,
+                'setting_conditions' => $setting?->conditions,
             ]);
-            
-            if (!$setting) {
-                \Illuminate\Support\Facades\Log::channel('single')->warning('EmailChannel: No notification setting found');
+
+            // Check if channel is enabled (database setting or config)
+            if (!$this->isChannelEnabled($setting)) {
+                Log::warning('EmailChannel: Channel disabled');
                 return false;
             }
 
-            if (!$setting->enabled) {
-                \Illuminate\Support\Facades\Log::channel('single')->warning('EmailChannel: Setting is disabled');
-                return false;
-            }
-
-            // Check if should notify
-            $shouldNotify = $setting->shouldNotify($logData);
-            \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - Should notify check', [
-                'should_notify' => $shouldNotify,
-                'log_level' => $logData['level'],
-                'allowed_levels' => $setting->getCondition('levels', []),
-                'current_environment' => app()->environment(),
-                'allowed_environments' => $setting->getCondition('environments', []),
-            ]);
-
-            if (!$shouldNotify) {
-                \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: Notification filtered out by setting conditions', [
-                    'setting_conditions' => $setting->conditions,
-                    'log_data' => $logData
-                ]);
+            // Check conditions if setting exists
+            if ($setting && !$setting->shouldNotify($logData)) {
+                Log::warning('EmailChannel: Conditions not met for notification');
                 return false;
             }
 
             // Get email configuration
-            $to = $setting->getSetting('to') ?? config('log-management.notifications.channels.email.to');
-            $from = $setting->getSetting('from') ?? config('log-management.notifications.channels.email.from', config('mail.from.address'));
-            $fromName = $setting->getSetting('from_name') ?? config('log-management.notifications.channels.email.from_name', config('mail.from.name'));
-
-            \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - Email config', [
-                'to' => $to,
-                'from' => $from,
-                'from_name' => $fromName,
-            ]);
-
-            if (!$to) {
-                \Illuminate\Support\Facades\Log::channel('single')->warning('EmailChannel: No recipient configured');
+            $emailConfig = $this->getEmailConfiguration($setting);
+            
+            if (!$emailConfig['to']) {
+                Log::warning('EmailChannel: No recipient configured', $emailConfig);
                 return false;
             }
 
+            Log::info('EmailChannel: DEBUG - Email config', $emailConfig);
+
             // Send email
-            \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - About to send email');
-            
             Mail::send('log-management::emails.log-notification', [
                 'logData' => $logData,
                 'level' => strtoupper($logData['level']),
                 'setting' => $setting,
-            ], function ($message) use ($to, $from, $fromName, $logData, $setting) {
-                $message->to($to)
-                    ->from($from, $fromName)
+            ], function ($message) use ($emailConfig, $logData, $setting) {
+                $message->to($emailConfig['to'])
+                    ->from($emailConfig['from'], $emailConfig['from_name'])
                     ->subject($this->getSubject($logData, $setting));
             });
 
-            \Illuminate\Support\Facades\Log::channel('single')->info('EmailChannel: DEBUG - Email sent successfully');
+            // Mark as notified if setting exists
+            if ($setting) {
+                $setting->markAsNotified();
+            }
 
-            $setting->markAsNotified();
+            Log::info('EmailChannel: Email sent successfully', [
+                'to' => $emailConfig['to'],
+                'subject' => $this->getSubject($logData, $setting),
+            ]);
             
             return true;
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::channel('single')->error('EmailChannel: DEBUG - Exception caught', [
+            Log::error('EmailChannel: Failed to send email notification', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
+                'log_data' => $logData,
             ]);
             return false;
         }
+    }
+
+    /**
+     * Check if channel is enabled (database setting or config fallback).
+     */
+    protected function isChannelEnabled(?NotificationSetting $setting): bool
+    {
+        // If we have a database setting, use it
+        if ($setting) {
+            return $setting->enabled;
+        }
+
+        // Fall back to configuration
+        return config('log-management.notifications.channels.email.enabled', false);
+    }
+
+    /**
+     * Get email configuration from setting or config.
+     */
+    protected function getEmailConfiguration(?NotificationSetting $setting): array
+    {
+        $config = [
+            'to' => $setting?->getSetting('to') ?? config('log-management.notifications.channels.email.to'),
+            'from' => $setting?->getSetting('from') ?? config('log-management.notifications.channels.email.from', config('mail.from.address')),
+            'from_name' => $setting?->getSetting('from_name') ?? config('log-management.notifications.channels.email.from_name', config('mail.from.name')),
+            'subject_prefix' => $setting?->getSetting('subject_prefix') ?? config('log-management.notifications.channels.email.subject_prefix', '[LOG ALERT]'),
+        ];
+
+        // Also check environment variables as fallback
+        if (!$config['to']) {
+            $config['to'] = env('LOG_MANAGEMENT_EMAIL_TO');
+        }
+        if (!$config['from']) {
+            $config['from'] = env('LOG_MANAGEMENT_EMAIL_FROM', env('MAIL_FROM_ADDRESS'));
+        }
+        if (!$config['from_name']) {
+            $config['from_name'] = env('LOG_MANAGEMENT_EMAIL_FROM_NAME', env('MAIL_FROM_NAME'));
+        }
+
+        return $config;
     }
 
     /**
@@ -108,16 +132,19 @@ class EmailChannel implements NotificationChannelInterface
      */
     public function isEnabled(): bool
     {
-        $configEnabled = config('log-management.notifications.channels.email.enabled', false);
-        $envEnabled = env('LOG_MANAGEMENT_EMAIL_ENABLED', false);
-        
-        if (!$configEnabled && !$envEnabled) {
+        // Check main notifications enabled
+        if (!config('log-management.notifications.enabled', true)) {
+            return false;
+        }
+
+        // Check if email channel is enabled
+        if (!config('log-management.notifications.channels.email.enabled', false)) {
             return false;
         }
 
         $setting = NotificationSetting::forChannel($this->name)->first();
         
-        return $setting ? $setting->enabled : true; // Default to enabled if no setting exists
+        return $setting ? $setting->enabled : true;
     }
 
     /**
@@ -133,50 +160,13 @@ class EmailChannel implements NotificationChannelInterface
      */
     public function validateConfiguration(): bool
     {
-        return $this->hasValidConfiguration();
-    }
-
-    /**
-     * Check if we have valid configuration.
-     */
-    protected function hasValidConfiguration(): bool
-    {
-        $setting = NotificationSetting::forChannel($this->name)->first();
-        $to = $setting?->getSetting('to') ?? 
-              config('log-management.notifications.channels.email.to') ??
-              env('LOG_MANAGEMENT_EMAIL_TO');
+        $config = $this->getEmailConfiguration(null);
         
-        return !empty($to) && filter_var($to, FILTER_VALIDATE_EMAIL);
+        return !empty($config['to']) && filter_var($config['to'], FILTER_VALIDATE_EMAIL);
     }
 
     /**
-     * Create a default notification setting from configuration.
-     */
-    protected function createDefaultNotificationSetting(): NotificationSetting
-    {
-        return NotificationSetting::create([
-            'channel' => $this->name,
-            'enabled' => true,
-            'settings' => [
-                'to' => config('log-management.notifications.channels.email.to') ?? env('LOG_MANAGEMENT_EMAIL_TO'),
-                'from' => config('log-management.notifications.channels.email.from') ?? config('mail.from.address'),
-                'from_name' => config('log-management.notifications.channels.email.from_name') ?? config('mail.from.name'),
-                'subject_prefix' => config('log-management.notifications.channels.email.subject_prefix', '[LOG ALERT]'),
-            ],
-            'conditions' => [
-                'levels' => config('log-management.notifications.levels', ['error', 'critical', 'emergency']),
-                'environments' => config('log-management.environments', ['production', 'staging']),
-            ],
-            'rate_limit' => [
-                'enabled' => false,
-                'max_per_minute' => 10,
-                'window_minutes' => 1,
-            ],
-        ]);
-    }
-
-    /**
-     * Get configuration requirements.
+     * Get the channel configuration requirements.
      */
     public function getConfigurationRequirements(): array
     {
@@ -198,7 +188,6 @@ class EmailChannel implements NotificationChannelInterface
                 return [
                     'success' => false,
                     'message' => 'Invalid email configuration',
-                    'details' => $this->getConfigurationStatus(),
                 ];
             }
 
@@ -215,37 +204,13 @@ class EmailChannel implements NotificationChannelInterface
             return [
                 'success' => $result,
                 'message' => $result ? 'Test email sent successfully' : 'Failed to send test email',
-                'details' => $this->getConfigurationStatus(),
             ];
         } catch (\Exception $e) {
             return [
                 'success' => false,
                 'message' => 'Email test failed: ' . $e->getMessage(),
-                'details' => $this->getConfigurationStatus(),
             ];
         }
-    }
-
-    /**
-     * Get configuration status for debugging.
-     */
-    protected function getConfigurationStatus(): array
-    {
-        $setting = NotificationSetting::forChannel($this->name)->first();
-        
-        return [
-            'channel_enabled' => $this->isEnabled(),
-            'config_valid' => $this->hasValidConfiguration(),
-            'mail_driver' => config('mail.default'),
-            'mail_from_address' => config('mail.from.address'),
-            'mail_from_name' => config('mail.from.name'),
-            'log_management_email_enabled' => config('log-management.notifications.channels.email.enabled'),
-            'log_management_email_to' => config('log-management.notifications.channels.email.to'),
-            'env_email_enabled' => env('LOG_MANAGEMENT_EMAIL_ENABLED'),
-            'env_email_to' => env('LOG_MANAGEMENT_EMAIL_TO'),
-            'setting_exists' => $setting !== null,
-            'setting_enabled' => $setting ? $setting->enabled : null,
-        ];
     }
 
     /**
@@ -253,8 +218,8 @@ class EmailChannel implements NotificationChannelInterface
      */
     protected function getSubject(array $logData, ?NotificationSetting $setting = null): string
     {
-        $prefix = $setting?->getSetting('subject_prefix') ?? 
-                  config('log-management.notifications.channels.email.subject_prefix', '[LOG ALERT]');
+        $config = $this->getEmailConfiguration($setting);
+        $prefix = $config['subject_prefix'];
         
         $level = strtoupper($logData['level']);
         $environment = strtoupper($logData['environment']);
@@ -263,27 +228,12 @@ class EmailChannel implements NotificationChannelInterface
     }
 
     /**
-     * Get plain text content for fallback email.
+     * Check if log level should trigger notification.
      */
-    protected function getTextContent(array $logData): string
+    protected function shouldNotifyForLevel(array $logData): bool
     {
-        $level = strtoupper($logData['level']);
-        $environment = $logData['environment'];
-        $message = $logData['message'];
-        $timestamp = $logData['timestamp'];
+        $notificationLevels = config('log-management.notifications.levels', ['error', 'critical', 'emergency']);
         
-        $content = "Log Alert: {$level} Level\n";
-        $content .= "Environment: {$environment}\n";
-        $content .= "Timestamp: {$timestamp}\n";
-        $content .= "Message: {$message}\n";
-        
-        if (!empty($logData['context'])) {
-            $content .= "\nContext:\n";
-            $content .= json_encode($logData['context'], JSON_PRETTY_PRINT);
-        }
-        
-        $content .= "\n\nThis alert was generated by the Log Management Package.";
-        
-        return $content;
+        return in_array(strtolower($logData['level']), array_map('strtolower', $notificationLevels));
     }
 }

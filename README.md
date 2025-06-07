@@ -191,8 +191,6 @@ LOG_MANAGEMENT_RATE_LIMIT_MAX=10
 # Test your setup
 php artisan log-management:test --all
 
-# Check system health
-php artisan log-management:health
 ```
 
 ---

@@ -20,6 +20,11 @@ class SlackChannel implements NotificationChannelInterface
             $setting = NotificationSetting::forChannel($this->name)->first();
             
             if (!$setting || !$setting->shouldNotify($logData)) {
+                Log::info('Slack notification skipped due to settings', [
+                    'setting_exists' => !!$setting,
+                    'should_notify' => $setting ? $setting->shouldNotify($logData) : false,
+                    'log_level' => $logData['level'] ?? 'unknown'
+                ]);
                 return false;
             }
 
@@ -27,23 +32,42 @@ class SlackChannel implements NotificationChannelInterface
                          config('log-management.notifications.channels.slack.webhook_url');
 
             if (!$webhookUrl) {
-                Log::channel('single')->warning('Slack notification skipped: No webhook URL configured');
+                Log::warning('Slack notification skipped: No webhook URL configured');
                 return false;
             }
 
+            Log::info('Attempting to send Slack notification', [
+                'webhook_url' => substr($webhookUrl, 0, 50) . '...',
+                'log_level' => $logData['level'],
+                'message' => substr($logData['message'], 0, 100)
+            ]);
+
             $payload = $this->buildSlackPayload($logData, $setting);
             
-            $response = Http::timeout(10)->post($webhookUrl, $payload);
+            Log::info('Slack payload', ['payload' => $payload]);
+            
+            $response = Http::timeout(30)->post($webhookUrl, $payload);
+
+            Log::info('Slack response', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+                'successful' => $response->successful()
+            ]);
 
             if ($response->successful()) {
                 $setting->markAsNotified();
                 return true;
             }
 
-            Log::channel('single')->error('Slack notification failed: ' . $response->body());
+            Log::error('Slack notification failed: ' . $response->body(), [
+                'status' => $response->status(),
+                'webhook_url' => substr($webhookUrl, 0, 50) . '...'
+            ]);
             return false;
         } catch (\Exception $e) {
-            Log::channel('single')->error('Failed to send Slack notification: ' . $e->getMessage());
+            Log::error('Failed to send Slack notification: ' . $e->getMessage(), [
+                'exception' => $e->getTraceAsString()
+            ]);
             return false;
         }
     }
@@ -53,7 +77,14 @@ class SlackChannel implements NotificationChannelInterface
      */
     public function isEnabled(): bool
     {
-        if (!config('log-management.notifications.channels.slack.enabled', false)) {
+        $configEnabled = config('log-management.notifications.channels.slack.enabled', false);
+        
+        Log::info('Checking if Slack channel is enabled', [
+            'config_enabled' => $configEnabled,
+            'webhook_url_set' => !empty(config('log-management.notifications.channels.slack.webhook_url'))
+        ]);
+        
+        if (!$configEnabled) {
             return false;
         }
 
@@ -79,7 +110,15 @@ class SlackChannel implements NotificationChannelInterface
         $webhookUrl = $setting?->getSetting('webhook_url') ?? 
                      config('log-management.notifications.channels.slack.webhook_url');
         
-        return !empty($webhookUrl) && filter_var($webhookUrl, FILTER_VALIDATE_URL);
+        $isValid = !empty($webhookUrl) && filter_var($webhookUrl, FILTER_VALIDATE_URL);
+        
+        Log::info('Slack configuration validation', [
+            'webhook_url_set' => !empty($webhookUrl),
+            'is_valid_url' => $isValid,
+            'webhook_preview' => $webhookUrl ? substr($webhookUrl, 0, 50) . '...' : 'not set'
+        ]);
+        
+        return $isValid;
     }
 
     /**
@@ -141,22 +180,24 @@ class SlackChannel implements NotificationChannelInterface
         $message = $logData['message'];
         $timestamp = $logData['timestamp'];
 
+        // Get mention users
+        $mentionUsers = $setting?->getSetting('mention_users') ?? 
+                       config('log-management.notifications.channels.slack.mention_users', '');
+        
+        // Build the main text with mentions
+        $mainText = $this->getSlackText($logData);
+        if ($mentionUsers) {
+            $mainText = $mentionUsers . ' ' . $mainText;
+        }
+
         $payload = [
-            'text' => $this->getSlackText($logData),
+            'text' => $mainText,
             'channel' => $setting?->getSetting('channel') ?? 
                         config('log-management.notifications.channels.slack.channel', '#alerts'),
             'username' => $setting?->getSetting('username') ?? 
                          config('log-management.notifications.channels.slack.username', 'Log Management'),
-            'attachments' => [
-                [
-                    'color' => $this->getSlackColor($logData['level']),
-                    'title' => "Log Alert: {$level} in {$environment}",
-                    'text' => strlen($message) > 300 ? substr($message, 0, 300) . '...' : $message,
-                    'fields' => $this->buildSlackFields($logData),
-                    'footer' => 'Log Management Package',
-                    'ts' => strtotime($timestamp),
-                ]
-            ]
+            'unfurl_links' => false,
+            'unfurl_media' => false,
         ];
 
         // Add icon
@@ -171,6 +212,19 @@ class SlackChannel implements NotificationChannelInterface
             $payload['icon_url'] = $iconUrl;
         }
 
+        // Add rich attachment for better formatting
+        $payload['attachments'] = [
+            [
+                'color' => $this->getSlackColor($logData['level']),
+                'title' => "🚨 Log Alert: {$level} in {$environment}",
+                'text' => strlen($message) > 300 ? substr($message, 0, 300) . '...' : $message,
+                'fields' => $this->buildSlackFields($logData),
+                'footer' => 'Log Management Package',
+                'ts' => strtotime($timestamp),
+                'mrkdwn_in' => ['text', 'fields']
+            ]
+        ];
+
         return $payload;
     }
 
@@ -183,7 +237,7 @@ class SlackChannel implements NotificationChannelInterface
         $level = strtoupper($logData['level']);
         $environment = $logData['environment'];
         
-        return "{$emoji} Log Alert: {$level} level log detected in {$environment}";
+        return "{$emoji} *Log Alert:* {$level} level log detected in *{$environment}*";
     }
 
     /**
@@ -202,11 +256,6 @@ class SlackChannel implements NotificationChannelInterface
                 'value' => $logData['environment'],
                 'short' => true,
             ],
-            [
-                'title' => 'Timestamp',
-                'value' => $logData['timestamp'],
-                'short' => true,
-            ],
         ];
 
         if (!empty($logData['url'])) {
@@ -217,15 +266,20 @@ class SlackChannel implements NotificationChannelInterface
             ];
         }
 
-        if (!empty($logData['context'])) {
-            $contextStr = json_encode($logData['context'], JSON_PRETTY_PRINT);
+        if (!empty($logData['context']) && is_array($logData['context'])) {
+            $contextStr = '';
+            foreach ($logData['context'] as $key => $value) {
+                $valueStr = is_array($value) || is_object($value) ? json_encode($value) : $value;
+                $contextStr .= "*{$key}:* {$valueStr}\n";
+            }
+            
             if (strlen($contextStr) > 500) {
                 $contextStr = substr($contextStr, 0, 500) . '...';
             }
             
             $fields[] = [
                 'title' => 'Context',
-                'value' => "```{$contextStr}```",
+                'value' => $contextStr,
                 'short' => false,
             ];
         }
