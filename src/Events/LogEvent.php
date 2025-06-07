@@ -7,17 +7,14 @@ use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class LogEvent implements ShouldBroadcastNow
+class LogEvent implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public array $logData;
-    public string $eventId;
-    public string $timestamp;
 
     /**
      * Create a new event instance.
@@ -25,8 +22,6 @@ class LogEvent implements ShouldBroadcastNow
     public function __construct(array $logData)
     {
         $this->logData = $logData;
-        $this->eventId = uniqid('log_', true);
-        $this->timestamp = now()->toISOString();
     }
 
     /**
@@ -34,20 +29,10 @@ class LogEvent implements ShouldBroadcastNow
      */
     public function broadcastOn(): array
     {
-        $channels = [];
-
-        // General log channel
-        $channels[] = new Channel('log-management.logs');
-
-        // Level-specific channel
-        $channels[] = new Channel('log-management.logs.' . strtolower($this->logData['level']));
-
-        // Channel-specific if available
-        if (isset($this->logData['channel'])) {
-            $channels[] = new Channel('log-management.logs.channel.' . $this->logData['channel']);
-        }
-
-        return $channels;
+        return [
+            new Channel('log-management'),
+            new PrivateChannel('log-management.level.' . strtolower($this->logData['level'])),
+        ];
     }
 
     /**
@@ -56,14 +41,15 @@ class LogEvent implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'id' => $this->eventId,
-            'timestamp' => $this->timestamp,
+            'id' => uniqid(),
+            'type' => 'log',
+            'timestamp' => $this->logData['datetime'] ?? now()->toISOString(),
             'level' => $this->logData['level'],
             'message' => $this->logData['message'],
             'channel' => $this->logData['channel'] ?? 'default',
+            'environment' => $this->logData['environment'],
             'context' => $this->logData['context'] ?? [],
-            'extra' => $this->logData['extra'] ?? [],
-            'environment' => app()->environment(),
+            'user_id' => $this->logData['user_id'] ?? null,
         ];
     }
 
@@ -80,28 +66,15 @@ class LogEvent implements ShouldBroadcastNow
      */
     public function shouldBroadcast(): bool
     {
-        // Check if broadcasting is enabled
+        // Only broadcast if SSE is enabled and this is an appropriate log level
         if (!config('log-management.sse.enabled', true)) {
             return false;
         }
 
-        // Check if this log level should be broadcasted
-        $broadcastLevels = config('log-management.sse.levels', [
-            'debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'
+        $streamLevels = config('log-management.sse.levels', [
+            'emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info'
         ]);
 
-        return in_array(strtolower($this->logData['level']), $broadcastLevels);
-    }
-
-    /**
-     * Get the tags that should be assigned to the job.
-     */
-    public function tags(): array
-    {
-        return [
-            'log-management',
-            'log-level:' . strtolower($this->logData['level']),
-            'log-channel:' . ($this->logData['channel'] ?? 'default'),
-        ];
+        return in_array(strtolower($this->logData['level']), $streamLevels);
     }
 }

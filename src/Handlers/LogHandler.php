@@ -19,6 +19,7 @@ class LogHandler extends AbstractProcessingHandler
     protected LogNotifierService $notifierService;
     protected LogStreamService $streamService;
     protected LogFilterService $filterService;
+    protected static bool $processing = false; // Prevent infinite loops
 
     public function __construct(
         LogNotifierService $notifierService,
@@ -38,31 +39,109 @@ class LogHandler extends AbstractProcessingHandler
      */
     protected function write(LogRecord $record): void
     {
-        // Convert log record to array format with enhanced context
-        $logData = $this->buildLogData($record);
-
-        // Apply filters
-        if (!$this->filterService->shouldProcess($logData)) {
+        // CRITICAL: Prevent infinite logging loops
+        if (self::$processing) {
             return;
         }
 
-        // Store log entry in database if enabled
-        if (config('log-management.database.enabled', true)) {
-            $this->storeLogEntry($logData);
+        // Skip if this is from our own package to prevent loops
+        if (str_contains($record->message, 'log-management') || 
+            str_contains($record->channel, 'log-management')) {
+            return;
         }
 
-        // Check if we should send notifications
-        if ($this->shouldNotify($record->level)) {
+        self::$processing = true;
+
+        try {
+            // Convert log record to array format with enhanced context
+            $logData = $this->buildLogData($record);
+
+            // Apply filters (with safe error handling)
+            if (!$this->safeFilterCheck($logData)) {
+                return;
+            }
+
+            // Store log entry in database if enabled
+            if (config('log-management.database.enabled', true)) {
+                $this->safeStoreLogEntry($logData);
+            }
+
+            // Check if we should send notifications
+            if ($this->shouldNotify($record->level)) {
+                $this->safeNotify($logData);
+            }
+
+            // Dispatch event for real-time streaming
+            if (config('log-management.sse.enabled', true)) {
+                $this->safeDispatchEvent($logData);
+            }
+
+        } catch (\Throwable $e) {
+            // NEVER log errors from the log handler to prevent infinite loops
+            // Instead, write directly to a separate error file if needed
+            $this->writeErrorToFile($e, $record);
+        } finally {
+            self::$processing = false;
+        }
+    }
+
+    /**
+     * Safe filter check with error handling
+     */
+    protected function safeFilterCheck(array $logData): bool
+    {
+        try {
+            return $this->filterService->shouldProcess($logData);
+        } catch (\Throwable $e) {
+            // If filtering fails, allow the log to proceed
+            $this->writeErrorToFile($e, null, 'Filter check failed');
+            return true;
+        }
+    }
+
+    /**
+     * Safe notification with error handling
+     */
+    protected function safeNotify(array $logData): void
+    {
+        try {
             $this->notifierService->notify(
                 $logData['message'],
                 $logData['level'],
                 $logData['context']
             );
+        } catch (\Throwable $e) {
+            $this->writeErrorToFile($e, null, 'Notification failed');
         }
+    }
 
-        // Dispatch event for real-time streaming
-        if (config('log-management.sse.enabled', true)) {
+    /**
+     * Safe event dispatch with error handling
+     */
+    protected function safeDispatchEvent(array $logData): void
+    {
+        try {
             Event::dispatch(new LogEvent($logData));
+        } catch (\Throwable $e) {
+            $this->writeErrorToFile($e, null, 'Event dispatch failed');
+        }
+    }
+
+    /**
+     * Write error to a separate file to avoid logging loops
+     */
+    protected function writeErrorToFile(\Throwable $e, ?LogRecord $record = null, string $context = ''): void
+    {
+        try {
+            $errorFile = storage_path('logs/log-management-errors.log');
+            $timestamp = date('Y-m-d H:i:s');
+            $errorMessage = "[$timestamp] LOG_MANAGEMENT_ERROR: $context - {$e->getMessage()}\n";
+            
+            // Use file_put_contents with LOCK_EX to safely write
+            file_put_contents($errorFile, $errorMessage, FILE_APPEND | LOCK_EX);
+        } catch (\Throwable $writeError) {
+            // If we can't even write to the error file, give up silently
+            // to prevent any chance of infinite loops
         }
     }
 
@@ -100,6 +179,43 @@ class LogHandler extends AbstractProcessingHandler
     }
 
     /**
+     * Store log entry in database with safe error handling.
+     */
+    protected function safeStoreLogEntry(array $logData): void
+    {
+        try {
+            LogEntry::create([
+                'message' => $logData['message'],
+                'level' => strtolower($logData['level']),
+                'channel' => $logData['channel'],
+                'context' => json_encode($logData['context']),
+                'extra' => json_encode($logData['extra']),
+                'environment' => $logData['environment'],
+                'user_id' => $logData['user_id'],
+                'session_id' => $logData['session_id'],
+                'request_id' => $logData['request_id'],
+                'ip_address' => $logData['ip_address'],
+                'user_agent' => $logData['user_agent'],
+                'url' => $logData['url'],
+                'method' => $logData['method'],
+                'status_code' => $logData['status_code'],
+                'execution_time' => $logData['execution_time'],
+                'memory_usage' => $logData['memory_usage'],
+                'file_path' => $logData['file_path'],
+                'line_number' => $logData['line_number'],
+                'stack_trace' => $logData['stack_trace'],
+                'tags' => $logData['tags'] ? json_encode($logData['tags']) : null,
+                'created_at' => $logData['datetime'],
+            ]);
+        } catch (\Throwable $e) {
+            // NEVER use Log:: here - it would create an infinite loop
+            $this->writeErrorToFile($e, null, 'Database storage failed');
+        }
+    }
+
+    // Keep all your existing helper methods but remove any Log:: calls...
+    
+    /**
      * Get current request instance safely.
      */
     protected function getCurrentRequest()
@@ -108,7 +224,7 @@ class LogHandler extends AbstractProcessingHandler
             if (app()->bound('request')) {
                 return request();
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             // Request not available (CLI, etc.)
         }
         
@@ -122,7 +238,7 @@ class LogHandler extends AbstractProcessingHandler
     {
         try {
             return Auth::user();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return null;
         }
     }
@@ -164,9 +280,26 @@ class LogHandler extends AbstractProcessingHandler
         return $extra;
     }
 
+    // ... (keep all your other helper methods like getSessionId, getRequestId, etc.)
+    // Just remove any calls to Log:: facade from them
+
     /**
-     * Get session ID.
+     * Determine if we should send notifications for this log level.
      */
+    protected function shouldNotify(Level $level): bool
+    {
+        if (!config('log-management.notifications.enabled', true)) {
+            return false;
+        }
+
+        $notificationLevels = config('log-management.notifications.levels', ['error', 'critical', 'emergency']);
+        
+        return in_array(strtolower($level->name), $notificationLevels);
+    }
+
+    // Add all your other helper methods here, but make sure NONE of them use Log:: facade
+    // ... (getSessionId, getRequestId, getIpAddress, etc.)
+    
     protected function getSessionId(): ?string
     {
         try {
@@ -180,57 +313,34 @@ class LogHandler extends AbstractProcessingHandler
         return null;
     }
 
-    /**
-     * Get request ID.
-     */
     protected function getRequestId($request): ?string
     {
         if (!$request) {
             return null;
         }
 
-        // Try to get from header first
         $requestId = $request->header('X-Request-ID') ?? 
                     $request->header('X-Correlation-ID') ?? 
                     $request->header('Request-ID');
 
-        // Generate one if not present
         if (!$requestId) {
             $requestId = (string) Str::uuid();
-            // Store it for this request
             $request->headers->set('X-Request-ID', $requestId);
         }
 
         return $requestId;
     }
 
-    /**
-     * Get IP address.
-     */
     protected function getIpAddress($request): ?string
     {
-        if (!$request) {
-            return null;
-        }
-
-        return $request->ip();
+        return $request?->ip();
     }
 
-    /**
-     * Get user agent.
-     */
     protected function getUserAgent($request): ?string
     {
-        if (!$request) {
-            return null;
-        }
-
-        return $request->userAgent();
+        return $request?->userAgent();
     }
 
-    /**
-     * Get URL.
-     */
     protected function getUrl($request): ?string
     {
         if (!$request) {
@@ -244,21 +354,11 @@ class LogHandler extends AbstractProcessingHandler
         }
     }
 
-    /**
-     * Get HTTP method.
-     */
     protected function getMethod($request): ?string
     {
-        if (!$request) {
-            return null;
-        }
-
-        return $request->method();
+        return $request?->method();
     }
 
-    /**
-     * Get status code (if response is available).
-     */
     protected function getStatusCode($request): ?int
     {
         try {
@@ -273,198 +373,72 @@ class LogHandler extends AbstractProcessingHandler
         return null;
     }
 
-    /**
-     * Get execution time.
-     */
     protected function getExecutionTime(): ?float
     {
         if (defined('LARAVEL_START')) {
-            return round((microtime(true) - LARAVEL_START) * 1000, 2); // in milliseconds
+            return round((microtime(true) - LARAVEL_START) * 1000, 2);
         }
 
         return null;
     }
 
-    /**
-     * Get memory usage.
-     */
     protected function getMemoryUsage(): ?int
     {
         return memory_get_usage(true);
     }
 
-    /**
-     * Get file path from log record.
-     */
     protected function getFilePath(LogRecord $record): ?string
     {
-        // Try to extract from context first
         if (isset($record->context['exception']) && $record->context['exception'] instanceof \Throwable) {
             return $record->context['exception']->getFile();
         }
 
-        // Try to get from extra data
         if (isset($record->extra['file'])) {
             return $record->extra['file'];
         }
 
-        // Get from backtrace
-        $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 10);
-        foreach ($trace as $item) {
-            if (isset($item['file']) && !str_contains($item['file'], 'vendor/monolog')) {
-                return $item['file'];
-            }
-        }
-
         return null;
     }
 
-    /**
-     * Get line number from log record.
-     */
     protected function getLineNumber(LogRecord $record): ?int
     {
-        // Try to extract from context first
         if (isset($record->context['exception']) && $record->context['exception'] instanceof \Throwable) {
             return $record->context['exception']->getLine();
         }
 
-        // Try to get from extra data
         if (isset($record->extra['line'])) {
             return (int) $record->extra['line'];
         }
 
-        // Get from backtrace
-        $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 10);
-        foreach ($trace as $item) {
-            if (isset($item['file']) && !str_contains($item['file'], 'vendor/monolog')) {
-                return $item['line'] ?? null;
-            }
-        }
-
         return null;
     }
 
-    /**
-     * Get stack trace.
-     */
     protected function getStackTrace(LogRecord $record): ?string
     {
-        // Try to extract from context first
         if (isset($record->context['exception']) && $record->context['exception'] instanceof \Throwable) {
             return $record->context['exception']->getTraceAsString();
         }
 
-        // Generate stack trace for error level logs
-        if (in_array(strtolower($record->level->name), ['error', 'critical', 'emergency', 'alert'])) {
-            $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 15);
-            $formattedTrace = [];
-            
-            foreach ($trace as $index => $item) {
-                $file = $item['file'] ?? 'unknown';
-                $line = $item['line'] ?? 'unknown';
-                $function = $item['function'] ?? 'unknown';
-                $class = isset($item['class']) ? $item['class'] . '::' : '';
-                
-                $formattedTrace[] = "#{$index} {$file}({$line}): {$class}{$function}()";
-            }
-            
-            return implode("\n", $formattedTrace);
-        }
-
         return null;
     }
 
-    /**
-     * Get tags from log record.
-     */
     protected function getTags(LogRecord $record): ?array
     {
         $tags = [];
 
-        // Add level as tag
         $tags[] = 'level:' . strtolower($record->level->name);
-
-        // Add channel as tag
         $tags[] = 'channel:' . $record->channel;
-
-        // Add environment as tag
         $tags[] = 'env:' . app()->environment();
 
-        // Extract tags from context
         if (isset($record->context['tags']) && is_array($record->context['tags'])) {
             $tags = array_merge($tags, $record->context['tags']);
         }
 
-        // Add user-related tags if available
         $user = $this->getCurrentUser();
         if ($user) {
             $tags[] = 'user_id:' . $user->id;
-            if (method_exists($user, 'getRoleNames')) {
-                $roles = $user->getRoleNames();
-                foreach ($roles as $role) {
-                    $tags[] = 'role:' . $role;
-                }
-            }
         }
 
         return empty($tags) ? null : $tags;
-    }
-
-    /**
-     * Store log entry in database.
-     */
-    protected function storeLogEntry(array $logData): void
-    {
-        try {
-            LogEntry::create([
-                'message' => $logData['message'],
-                'level' => strtolower($logData['level']),
-                'channel' => $logData['channel'],
-                'context' => json_encode($logData['context']),
-                'extra' => json_encode($logData['extra']),
-                'environment' => $logData['environment'],
-                'user_id' => $logData['user_id'],
-                'session_id' => $logData['session_id'],
-                'request_id' => $logData['request_id'],
-                'ip_address' => $logData['ip_address'],
-                'user_agent' => $logData['user_agent'],
-                'url' => $logData['url'],
-                'method' => $logData['method'],
-                'status_code' => $logData['status_code'],
-                'execution_time' => $logData['execution_time'],
-                'memory_usage' => $logData['memory_usage'],
-                'file_path' => $logData['file_path'],
-                'line_number' => $logData['line_number'],
-                'stack_trace' => $logData['stack_trace'],
-                'tags' => $logData['tags'] ? json_encode($logData['tags']) : null,
-                'created_at' => $logData['datetime'],
-            ]);
-        } catch (\Exception $e) {
-            // Silently fail to prevent logging loops
-            // Optionally log to a different channel
-            try {
-                \Illuminate\Support\Facades\Log::channel('single')->error(
-                    'Failed to store log entry: ' . $e->getMessage(),
-                    ['original_log' => $logData]
-                );
-            } catch (\Exception $innerException) {
-                // Even this failed, give up
-            }
-        }
-    }
-
-    /**
-     * Determine if we should send notifications for this log level.
-     */
-    protected function shouldNotify(Level $level): bool
-    {
-        if (!config('log-management.notifications.enabled', true)) {
-            return false;
-        }
-
-        $notificationLevels = config('log-management.notifications.levels', ['error', 'critical', 'emergency']);
-        
-        return in_array(strtolower($level->name), $notificationLevels);
     }
 }
