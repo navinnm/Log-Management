@@ -101,6 +101,95 @@ class LogStreamController extends Controller
     }
 
     /**
+     * Get a single log entry by ID.
+     */
+    public function getLog(Request $request, $id)
+    {
+        if (!$this->hasAccess($request)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $log = LogEntry::find($id);
+
+        if (!$log) {
+            return response()->json(['error' => 'Log entry not found'], 404);
+        }
+
+        return response()->json([
+            'id' => $log->id,
+            'level' => $log->level,
+            'channel' => $log->channel,
+            'message' => $log->message,
+            'context' => $log->context,
+            'extra' => $log->extra,
+            'created_at' => $log->created_at->toISOString(),
+            'updated_at' => $log->updated_at?->toISOString(),
+        ]);
+    }
+
+    /**
+     * Search logs with advanced filtering.
+     */
+    public function searchLogs(Request $request)
+    {
+        if (!$this->hasAccess($request)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $query = LogEntry::query();
+
+        // Apply search filters
+        if ($request->has('q')) {
+            $searchTerm = $request->get('q');
+            $query->where(function ($q) use ($searchTerm) {
+                $q->where('message', 'like', "%{$searchTerm}%")
+                  ->orWhere('context', 'like', "%{$searchTerm}%")
+                  ->orWhere('extra', 'like', "%{$searchTerm}%");
+            });
+        }
+
+        // Apply other filters
+        if ($request->has('level')) {
+            $levels = is_array($request->level) ? $request->level : [$request->level];
+            $query->whereIn('level', $levels);
+        }
+
+        if ($request->has('channel')) {
+            $query->where('channel', $request->channel);
+        }
+
+        if ($request->has('date_from')) {
+            $query->where('created_at', '>=', $request->date_from);
+        }
+
+        if ($request->has('date_to')) {
+            $query->where('created_at', '<=', $request->date_to);
+        }
+
+        // Pagination
+        $perPage = min($request->get('per_page', 20), 100);
+        $logs = $query->orderBy('created_at', 'desc')->paginate($perPage);
+
+        return response()->json([
+            'data' => $logs->items(),
+            'meta' => [
+                'current_page' => $logs->currentPage(),
+                'last_page' => $logs->lastPage(),
+                'per_page' => $logs->perPage(),
+                'total' => $logs->total(),
+                'from' => $logs->firstItem(),
+                'to' => $logs->lastItem(),
+            ],
+            'links' => [
+                'first' => $logs->url(1),
+                'last' => $logs->url($logs->lastPage()),
+                'prev' => $logs->previousPageUrl(),
+                'next' => $logs->nextPageUrl(),
+            ]
+        ]);
+    }
+
+    /**
      * Get streaming statistics.
      */
     public function stats(Request $request)
@@ -115,15 +204,70 @@ class LogStreamController extends Controller
                 'total' => LogEntry::count(),
                 'today' => LogEntry::whereDate('created_at', today())->count(),
                 'last_hour' => LogEntry::where('created_at', '>=', now()->subHour())->count(),
+                'last_24_hours' => LogEntry::where('created_at', '>=', now()->subDay())->count(),
             ],
             'level_breakdown' => LogEntry::selectRaw('level, COUNT(*) as count')
                 ->where('created_at', '>=', now()->subDay())
                 ->groupBy('level')
                 ->pluck('count', 'level')
                 ->toArray(),
+            'channel_breakdown' => LogEntry::selectRaw('channel, COUNT(*) as count')
+                ->where('created_at', '>=', now()->subDay())
+                ->groupBy('channel')
+                ->limit(10)
+                ->pluck('count', 'channel')
+                ->toArray(),
         ];
 
         return response()->json($stats);
+    }
+
+    /**
+     * Get statistics summary.
+     */
+    public function getStatsSummary(Request $request)
+    {
+        if (!$this->hasAccess($request)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $days = $request->get('days', 7);
+        $fromDate = now()->subDays($days);
+
+        return response()->json([
+            'period' => "{$days} days",
+            'from_date' => $fromDate->toDateString(),
+            'to_date' => now()->toDateString(),
+            'summary' => LogEntry::getStats($days),
+        ]);
+    }
+
+    /**
+     * Get statistics trends.
+     */
+    public function getStatsTrends(Request $request)
+    {
+        if (!$this->hasAccess($request)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $days = $request->get('days', 7);
+        $fromDate = now()->subDays($days);
+
+        $trends = LogEntry::selectRaw('DATE(created_at) as date, level, COUNT(*) as count')
+            ->where('created_at', '>=', $fromDate)
+            ->groupBy('date', 'level')
+            ->orderBy('date')
+            ->get()
+            ->groupBy('date')
+            ->map(function ($dayLogs) {
+                return $dayLogs->pluck('count', 'level')->toArray();
+            });
+
+        return response()->json([
+            'period' => "{$days} days",
+            'trends' => $trends,
+        ]);
     }
 
     /**

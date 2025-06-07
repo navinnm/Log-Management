@@ -10,7 +10,7 @@
 
 **🚀 The most comprehensive Laravel log monitoring solution with real-time streaming, intelligent alerts, and multi-channel notifications**
 
-[📖 Documentation](https://docs.fulgid.com/log-management) • [🎬 Video Tour](https://demo.fulgid.com) • [💬 Community](https://github.com/fulgid/log-management/discussions) • [🐛 Report Bug](https://github.com/fulgid/log-management/issues)
+<!-- [📖 Documentation](https://docs.fulgid.com/log-management) • [🎬 Video Tour](https://demo.fulgid.com) • [💬 Community](https://github.com/fulgid/log-management/discussions) • [🐛 Report Bug](https://github.com/fulgid/log-management/issues) -->
 
 </div>
 
@@ -2021,14 +2021,14 @@ php artisan log-management:health --comprehensive
 ### 📞 Getting Help
 
 **Community Support:**
-- 💬 [GitHub Discussions](https://github.com/fulgid/log-management/discussions)
-- 🐛 [Bug Reports](https://github.com/fulgid/log-management/issues)
-- 📖 [Documentation](https://docs.fulgid.com/log-management)
+- 💬 [GitHub Discussions](https://github.com/navinnm/log-management/discussions)
+- 🐛 [Bug Reports](https://github.com/navinnm/log-management/issues)
+<!-- - 📖 [Documentation](https://docs.fulgid.com/log-management) -->
 
 **Professional Support:**
-- 📧 Email: support@fulgid.com
-- 💼 Enterprise: enterprise@fulgid.com
-- 🎯 Custom Development: dev@fulgid.com
+- 📧 Email: support@fulgid.in
+- 💼 Enterprise: enterprise@fulgid.in
+- 🎯 Custom Development: dev@fulgid.in
 
 ---
 
@@ -2040,7 +2040,7 @@ We welcome contributions! Here's how you can help:
 
 ```bash
 # Clone the repository
-git clone https://github.com/fulgid/log-management.git
+git clone https://github.com/navinnm/log-management.git
 cd log-management
 
 # Install dependencies
@@ -2197,7 +2197,7 @@ For commercial projects requiring additional features, support, or custom develo
 Contact **enterprise@fulgid.com** for licensing information.
 
 ---
-
+<!-- 
 ## 📚 Additional Resources
 
 ### 🎓 Learning Resources
@@ -2211,15 +2211,15 @@ Contact **enterprise@fulgid.com** for licensing information.
 **Video Courses:**
 - 🎬 [Complete Log Management Course](https://learn.fulgid.com/log-management)
 - 🎬 [Real-time Monitoring Masterclass](https://learn.fulgid.com/monitoring)
-- 🎬 [Laravel Logging Best Practices](https://learn.fulgid.com/laravel-logging)
+- 🎬 [Laravel Logging Best Practices](https://learn.fulgid.com/laravel-logging) -->
 
-### 🔗 Related Packages
+<!-- ### 🔗 Related Packages
 
 **Ecosystem:**
 - 📊 [Laravel Metrics](https://github.com/navinnm/laravel-metrics) - Application performance monitoring
 - 🔍 [Laravel Search](https://github.com/fulgid/laravel-search) - Advanced search capabilities
 - 📧 [Laravel Notifications+](https://github.com/fulgid/laravel-notifications-plus) - Enhanced notification system
-- 🛡️ [Laravel Security](https://github.com/fulgid/laravel-security) - Security monitoring and alerts
+- 🛡️ [Laravel Security](https://github.com/fulgid/laravel-security) - Security monitoring and alerts -->
 
 **Integrations:**
 - 🔭 Laravel Telescope
