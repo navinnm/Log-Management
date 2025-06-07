@@ -1083,7 +1083,6 @@ const filteredStream = new EventSource(
                 }, 5000);
             };
         }
-        
         function handleStreamMessage(data) {
             updateLastUpdate();
             
@@ -1226,7 +1225,7 @@ const filteredStream = new EventSource(
             return icons[level] || '📝';
         }
         
-        
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
