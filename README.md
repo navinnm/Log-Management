@@ -1226,6 +1226,7 @@ const filteredStream = new EventSource(
             return icons[level] || '📝';
         }
         
+        
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
