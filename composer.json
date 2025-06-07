@@ -16,6 +16,7 @@
             "name": "Fulgid",
             "email": "ping@fulgid.in"
         }
+        
     ],
     "require": {
         "php": "^8.0",
