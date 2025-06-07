@@ -2311,7 +2311,7 @@ Thank you for choosing **Laravel Log Management**! This package represents hundr
 ### ⭐ Show Your Support
 
 If this package helps you build better applications, please consider:
-- ⭐ Starring the [GitHub repository](https://github.com/fulgid/log-management)
+- ⭐ Starring the [GitHub repository](https://github.com/navinnm/log-management)
 - 🐦 Sharing on social media
 - 📝 Writing a blog post about your experience
 - 💬 Recommending to colleagues
