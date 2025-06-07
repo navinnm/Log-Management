@@ -34,10 +34,10 @@ return new class extends Migration
             $table->string('updated_by')->nullable();
             $table->timestamps();
 
-            // Indexes
-            $table->index(['enabled', 'status']);
-            $table->index(['trigger_type', 'enabled']);
-            $table->index('last_triggered_at');
+            // Composite indexes only (single column indexes already defined above)
+            $table->index(['enabled', 'status'], 'log_alerts_enabled_status_index');
+            $table->index(['trigger_type', 'enabled'], 'log_alerts_trigger_type_enabled_index');
+            // Remove the duplicate last_triggered_at index since it's already indexed above
         });
     }
 

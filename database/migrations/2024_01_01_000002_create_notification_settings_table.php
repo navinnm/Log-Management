@@ -20,7 +20,7 @@ return new class extends Migration
             $table->json('rate_limit')->nullable();
             $table->json('filters')->nullable();
             $table->integer('priority')->default(1);
-            $table->timestamp('last_notification_at')->nullable()->index();
+            $table->timestamp('last_notification_at')->nullable(); // Remove ->index() from here
             $table->integer('notification_count')->default(0);
             $table->integer('failure_count')->default(0);
             $table->timestamp('last_failure_at')->nullable();
@@ -31,10 +31,10 @@ return new class extends Migration
             $table->string('updated_by')->nullable();
             $table->timestamps();
 
-            // Indexes
-            $table->index(['enabled', 'channel']);
-            $table->index(['maintenance_mode', 'enabled']);
-            $table->index('last_notification_at');
+            // Indexes - Use custom names to avoid conflicts
+            $table->index(['enabled', 'channel'], 'ns_enabled_channel_idx');
+            $table->index(['maintenance_mode', 'enabled'], 'ns_maintenance_enabled_idx');
+            $table->index('last_notification_at', 'ns_last_notification_idx');
         });
     }
 
