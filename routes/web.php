@@ -59,6 +59,9 @@ Route::group([
     
     // Statistics endpoint
     Route::get('/stats', [LogStreamController::class, 'stats'])->name('stats');
+    Route::get('/sse-test', function () {
+        return view('sse-test');
+    });
     Route::post('/test-log', function (Request $request) {
     // Check authentication
     if (config('log-management.auth.enabled', false)) {

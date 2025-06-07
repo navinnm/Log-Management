@@ -3,6 +3,7 @@
 namespace Fulgid\LogManagement\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Str;
 use Fulgid\LogManagement\Services\LogNotifierService;
 use Fulgid\LogManagement\Models\NotificationSetting;
 use Illuminate\Support\Facades\Log;
@@ -23,6 +24,248 @@ class LogManagementShowcaseCommand extends Command
         parent::__construct();
         $this->notifierService = $notifierService;
     }
+
+    protected function buildCustomLogData(string $message): array
+    {
+        return [
+            'level' => 'error',
+            'message' => $message,
+            'timestamp' => now()->toISOString(),
+            'environment' => app()->environment(),
+            'user_id' => 'usr_custom_' . uniqid(),
+            'session_id' => 'sess_custom_' . uniqid(),
+            'request_id' => 'req_custom_' . uniqid(),
+            'ip_address' => '192.168.1.' . rand(100, 200),
+            'user_agent' => 'Mozilla/5.0 (Custom Test Browser)',
+            'channel' => 'custom',
+            'url' => config('app.url') . '/custom-test',
+            'method' => 'GET',
+            'file_path' => '/app/Http/Controllers/CustomController.php',
+            'line_number' => rand(50, 200),
+            'execution_time' => rand(200, 2000),
+            'memory_usage' => rand(30, 120) * 1024 * 1024,
+            'stack_trace' => $this->generateRealisticStackTrace('/app/Http/Controllers/CustomController.php', rand(50, 200)),
+            'context' => [
+                'custom_error' => true,
+                'generated_by' => 'showcase_command',
+                'timestamp' => now()->toISOString(),
+            ]
+        ];
+    }
+
+    protected function generateRealisticStackTrace(string $filePath, int $lineNumber): string
+    {
+        $traces = [
+            "#0 {$filePath}({$lineNumber}): App\\Services\\DatabaseService->connect()",
+            "#1 /vendor/laravel/framework/src/Illuminate/Database/Connection.php(742): PDO->__construct()",
+            "#2 /vendor/laravel/framework/src/Illuminate/Database/Connectors/Connector.php(70): Illuminate\\Database\\Connectors\\MySqlConnector->connect()",
+            "#3 /vendor/laravel/framework/src/Illuminate/Database/DatabaseManager.php(358): Illuminate\\Database\\Connectors\\ConnectionFactory->make()",
+            "#4 /vendor/laravel/framework/src/Illuminate/Database/Eloquent/Model.php(1327): Illuminate\\Database\\Connection->select()",
+            "#5 /app/Http/Controllers/BaseController.php(89): Illuminate\\Database\\Eloquent\\Builder->get()",
+            "#6 /vendor/laravel/framework/src/Illuminate/Routing/Controller.php(54): App\\Http\\Controllers\\UserController->index()",
+            "#7 /vendor/laravel/framework/src/Illuminate/Routing/ControllerDispatcher.php(45): call_user_func_array()",
+            "#8 /vendor/laravel/framework/src/Illuminate/Routing/Route.php(262): Illuminate\\Routing\\ControllerDispatcher->dispatch()",
+            "#9 /vendor/laravel/framework/src/Illuminate/Routing/Router.php(693): Illuminate\\Routing\\Route->run()",
+            "#10 /vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(128): Illuminate\\Routing\\Router->runRoute()",
+            "#11 /app/Http/Middleware/CustomMiddleware.php(23): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()",
+            "#12 /vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(167): App\\Http\\Middleware\\CustomMiddleware->handle()",
+            "#13 /vendor/laravel/framework/src/Illuminate/Foundation/Http/Kernel.php(200): Illuminate\\Pipeline\\Pipeline->then()",
+            "#14 /public/index.php(51): Illuminate\\Foundation\\Http\\Kernel->handle()"
+        ];
+
+        return implode("\n", $traces);
+    }
+
+    protected function displayPreview(array $logData): void
+    {
+        $this->newLine();
+        $this->line('<fg=cyan>Preview of Showcase Data:</fg=cyan>');
+        $this->line('<fg=yellow>═══════════════════════════════════════════════════════════════</>');
+        
+        $this->table(
+            ['Property', 'Value'],
+            [
+                ['Level', '<fg=red>' . strtoupper($logData['level']) . '</>'],
+                ['Message', '<fg=white>' . Str::limit($logData['message'], 60) . '</>'],
+                ['Environment', '<fg=green>' . ($logData['environment'] ?? 'Unknown') . '</>'],
+                ['File', '<fg=blue>' . ($logData['file_path'] ?? 'N/A') . ':' . ($logData['line_number'] ?? 'N/A') . '</>'],
+                ['Execution Time', '<fg=yellow>' . ($logData['execution_time'] ?? 'N/A') . 'ms</>'],
+                ['Memory Usage', '<fg=magenta>' . (isset($logData['memory_usage']) ? round($logData['memory_usage'] / 1024 / 1024, 1) . 'MB' : 'N/A') . '</>'],
+                ['User ID', '<fg=cyan>' . ($logData['user_id'] ?? 'Anonymous') . '</>'],
+                ['IP Address', '<fg=white>' . ($logData['ip_address'] ?? 'Unknown') . '</>'],
+            ]
+        );
+        
+        $this->newLine();
+    }
+
+    protected function sendShowcaseNotification(string $template, array $logData): int
+    {
+        $this->info('🚀 Sending showcase notifications...');
+        $this->newLine();
+
+        $results = [];
+        $progressBar = $this->output->createProgressBar($template === 'both' ? 2 : 1);
+        $progressBar->start();
+
+        try {
+            if ($template === 'email' || $template === 'both') {
+                $this->line('📧 Testing Email Channel...');
+                $emailResult = $this->testEmailChannel($logData);
+                $results['email'] = $emailResult;
+                $progressBar->advance();
+            }
+
+            if ($template === 'slack' || $template === 'both') {
+                $this->line('💬 Testing Slack Channel...');
+                $slackResult = $this->testSlackChannel($logData);
+                $results['slack'] = $slackResult;
+                $progressBar->advance();
+            }
+
+            $progressBar->finish();
+            $this->newLine(2);
+
+            // Display results
+            $this->displayResults($results);
+
+            return self::SUCCESS;
+
+        } catch (\Exception $e) {
+            $progressBar->finish();
+            $this->newLine();
+            $this->error('❌ Showcase failed: ' . $e->getMessage());
+            return self::FAILURE;
+        }
+    }
+
+    protected function testEmailChannel(array $logData): array
+    {
+        try {
+            $channels = $this->notifierService->getChannels();
+            
+            if (!isset($channels['email'])) {
+                return [
+                    'success' => false,
+                    'message' => 'Email channel not configured'
+                ];
+            }
+
+            $emailChannel = $channels['email'];
+            
+            if (!$emailChannel->isEnabled()) {
+                return [
+                    'success' => false,
+                    'message' => 'Email channel is disabled'
+                ];
+            }
+
+            if (!$emailChannel->validateConfiguration()) {
+                return [
+                    'success' => false,
+                    'message' => 'Email configuration is invalid'
+                ];
+            }
+
+            $result = $emailChannel->send($logData);
+
+            return [
+                'success' => $result,
+                'message' => $result ? 
+                    'Professional email template sent successfully!' : 
+                    'Failed to send email notification'
+            ];
+
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => 'Email test failed: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    protected function testSlackChannel(array $logData): array
+    {
+        try {
+            $channels = $this->notifierService->getChannels();
+            
+            if (!isset($channels['slack'])) {
+                return [
+                    'success' => false,
+                    'message' => 'Slack channel not configured'
+                ];
+            }
+
+            $slackChannel = $channels['slack'];
+            
+            if (!$slackChannel->isEnabled()) {
+                return [
+                    'success' => false,
+                    'message' => 'Slack channel is disabled'
+                ];
+            }
+
+            if (!$slackChannel->validateConfiguration()) {
+                return [
+                    'success' => false,
+                    'message' => 'Slack configuration is invalid'
+                ];
+            }
+
+            $result = $slackChannel->send($logData);
+
+            return [
+                'success' => $result,
+                'message' => $result ? 
+                    'Professional Slack notification sent successfully!' : 
+                    'Failed to send Slack notification'
+            ];
+
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => 'Slack test failed: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    protected function displayResults(array $results): void
+    {
+        $this->line('<fg=cyan>📊 Showcase Results:</fg=cyan>');
+        $this->line('<fg=yellow>═══════════════════════════════════════════════════════════════</>');
+
+        foreach ($results as $channel => $result) {
+            $icon = $result['success'] ? '✅' : '❌';
+            $color = $result['success'] ? 'green' : 'red';
+            $channelName = ucfirst($channel);
+            
+            $this->line("  {$icon} <fg={$color}>{$channelName}:</> {$result['message']}");
+        }
+
+        $this->newLine();
+        
+        $successCount = count(array_filter($results, fn($r) => $r['success']));
+        $totalCount = count($results);
+        
+        if ($successCount === $totalCount) {
+            $this->info("🎉 All {$totalCount} notification channels sent successfully!");
+            $this->line('<fg=green>Your professional templates are working perfectly!</>');
+        } elseif ($successCount > 0) {
+            $this->warn("⚠️  {$successCount} of {$totalCount} channels sent successfully.");
+            $this->line('<fg=yellow>Some channels need configuration adjustments.</fg>');
+        } else {
+            $this->error("❌ No notifications were sent successfully.");
+            $this->line('<fg=red>Please check your notification channel configurations.</fg>');
+        }
+
+        $this->newLine();
+        $this->line('<fg=cyan>💡 Tips:</fg=cyan>');
+        $this->line('  • Check your email templates at: resources/views/vendor/log-management/emails/');
+        $this->line('  • Configure notification settings: php artisan log-management:test-notification');
+        $this->line('  • View dashboard: ' . config('app.url') . '/log-management');
+        $this->newLine();
+    }
+
 
     public function handle(): int
     {
@@ -201,220 +444,83 @@ class LogManagementShowcaseCommand extends Command
         ], $scenarioData);
     }
 
-    protected function buildCustomLogData(string $customMessage): array
+    protected function buildScenarioLogData(string $scenario): array
     {
-        return [
-            'level' => 'error',
-            'message' => $customMessage,
+        $scenarios = [
+            'database-connection' => [
+                'level' => 'critical',
+                'message' => 'Database connection pool exhausted: All 20 connections are in use',
+                'file_path' => '/app/Database/ConnectionManager.php',
+                'line_number' => 156,
+                'execution_time' => 5200,
+                'memory_usage' => 178 * 1024 * 1024,
+                'context' => [
+                    'pool_size' => 20,
+                    'active_connections' => 20,
+                    'waiting_requests' => 47,
+                    'database_host' => 'db-cluster-primary.internal'
+                ]
+            ],
+            'permission-error' => [
+                'level' => 'error',
+                'message' => 'Permission denied: Unable to write to /storage/app/uploads directory',
+                'file_path' => '/app/Http/Controllers/FileUploadController.php',
+                'line_number' => 89,
+                'execution_time' => 234,
+                'memory_usage' => 45 * 1024 * 1024,
+                'context' => [
+                    'attempted_file' => 'profile_photo_' . uniqid() . '.jpg',
+                    'file_size' => '2.3MB',
+                    'current_permissions' => '644',
+                    'required_permissions' => '755'
+                ]
+            ],
+            'memory-exhausted' => [
+                'level' => 'critical',
+                'message' => 'Fatal error: Allowed memory size of 128 MiB exhausted',
+                'file_path' => '/app/Services/DataExportService.php',
+                'line_number' => 203,
+                'execution_time' => 12450,
+                'memory_usage' => 128 * 1024 * 1024,
+                'context' => [
+                    'export_type' => 'user_analytics_report',
+                    'records_processed' => 847293,
+                    'total_records' => 1200000,
+                    'memory_limit' => '128M',
+                    'peak_memory' => '128M'
+                ]
+            ],
+            'api-timeout' => [
+                'level' => 'error',
+                'message' => 'HTTP timeout: External API call to https://api.stripe.com exceeded 30 second limit',
+                'file_path' => '/app/Services/PaymentGateway.php',
+                'line_number' => 78,
+                'execution_time' => 30000,
+                'memory_usage' => 52 * 1024 * 1024,
+                'context' => [
+                    'api_endpoint' => 'https://api.stripe.com/v1/charges',
+                    'timeout_limit' => '30s',
+                    'retry_count' => 3,
+                    'http_status' => null,
+                    'payment_intent' => 'pi_' . uniqid()
+                ]
+            ],
+        ];
+
+        $scenarioData = $scenarios[$scenario] ?? $scenarios['database-connection'];
+        
+        return array_merge([
             'timestamp' => now()->toISOString(),
             'environment' => app()->environment(),
-            'file_path' => '/app/Http/Controllers/CustomController.php',
-            'line_number' => rand(50, 200),
-            'url' => config('app.url') . '/custom/action',
+            'user_id' => 'usr_demo_' . uniqid(),
+            'session_id' => 'sess_demo_' . uniqid(),
+            'request_id' => 'req_demo_' . uniqid(),
+            'ip_address' => '10.0.' . rand(1, 255) . '.' . rand(1, 255),
+            'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'channel' => 'demo',
+            'url' => config('app.url') . '/demo/' . $scenario,
             'method' => 'POST',
-            'execution_time' => rand(200, 3000),
-            'memory_usage' => rand(30, 150) * 1024 * 1024,
-            'user_id' => 'usr_custom_' . uniqid(),
-            'session_id' => 'sess_custom_' . uniqid(),
-            'request_id' => 'req_custom_' . uniqid(),
-            'ip_address' => '192.168.1.' . rand(1, 255),
-            'user_agent' => 'Mozilla/5.0 (Custom Browser) AppleWebKit/537.36',
-            'channel' => 'custom',
-            'context' => [
-                'custom_data' => true,
-                'user_input' => substr($customMessage, 0, 50),
-                'timestamp' => now()->toISOString(),
-            ],
-            'stack_trace' => $this->generateRealisticStackTrace('/app/Http/Controllers/CustomController.php', rand(50, 200)),
-        ];
-    }
-
-    protected function generateRealisticStackTrace(string $filePath, int $lineNumber): string
-    {
-        $frames = [
-            "#{0} {$filePath}({$lineNumber}): App\\Http\\Controllers\\Controller->handleError()",
-            "#1 /vendor/laravel/framework/src/Illuminate/Routing/Controller.php(54): call_user_func_array()",
-            "#2 /vendor/laravel/framework/src/Illuminate/Routing/ControllerDispatcher.php(45): Illuminate\\Routing\\Controller->callAction()",
-            "#3 /vendor/laravel/framework/src/Illuminate/Routing/Route.php(262): Illuminate\\Routing\\ControllerDispatcher->dispatch()",
-            "#4 /vendor/laravel/framework/src/Illuminate/Routing/Route.php(205): Illuminate\\Routing\\Route->runController()",
-            "#5 /vendor/laravel/framework/src/Illuminate/Routing/Router.php(721): Illuminate\\Routing\\Route->run()",
-            "#6 /vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(141): Illuminate\\Routing\\Router->Illuminate\\Routing\\{closure}()",
-            "#7 /app/Http/Middleware/CheckForMaintenanceMode.php(62): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()",
-            "#8 /vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(180): App\\Http\\Middleware\\CheckForMaintenanceMode->handle()",
-            "#9 /vendor/laravel/framework/src/Illuminate/Foundation/Http/Kernel.php(200): Illuminate\\Pipeline\\Pipeline->then()",
-            "#10 /vendor/laravel/framework/src/Illuminate/Foundation/Http/Kernel.php(169): Illuminate\\Foundation\\Http\\Kernel->sendRequestThroughRouter()",
-            "#11 /public/index.php(55): Illuminate\\Foundation\\Http\\Kernel->handle()",
-            "#12 {main}"
-        ];
-
-        return implode("\n", $frames);
-    }
-
-    protected function displayPreview(array $logData): void
-    {
-        $this->info('📋 Notification Preview:');
-        $this->newLine();
-
-        // Create a nice preview table
-        $previewData = [
-            ['Field', 'Value'],
-            ['Level', strtoupper($logData['level'])],
-            ['Message', Str::limit($logData['message'], 80)],
-            ['Environment', $logData['environment']],
-            ['File', basename($logData['file_path'] ?? 'N/A')],
-            ['Line', $logData['line_number'] ?? 'N/A'],
-            ['Execution Time', ($logData['execution_time'] ?? 0) . 'ms'],
-            ['Memory Usage', round(($logData['memory_usage'] ?? 0) / 1024 / 1024, 1) . 'MB'],
-            ['User ID', $logData['user_id'] ?? 'N/A'],
-            ['IP Address', $logData['ip_address'] ?? 'N/A'],
-        ];
-
-        $this->table($previewData[0], array_slice($previewData, 1));
-        $this->newLine();
-    }
-
-    protected function sendShowcaseNotification(string $template, array $logData): int
-    {
-        $this->info('🚀 Sending showcase notification(s)...');
-        $this->newLine();
-
-        $results = [];
-
-        try {
-            if ($template === 'email' || $template === 'all' || $template === 'both') {
-                $this->line('📧 Testing Email Template...');
-                $emailResult = $this->testEmailTemplate($logData);
-                $results['email'] = $emailResult;
-                
-                if ($emailResult['success']) {
-                    $this->info('   ✅ Email template sent successfully!');
-                } else {
-                    $this->error('   ❌ Email template failed: ' . $emailResult['message']);
-                }
-            }
-
-            if ($template === 'slack' || $template === 'all' || $template === 'both') {
-                $this->line('💬 Testing Slack Template...');
-                $slackResult = $this->testSlackTemplate($logData);
-                $results['slack'] = $slackResult;
-                
-                if ($slackResult['success']) {
-                    $this->info('   ✅ Slack template sent successfully!');
-                } else {
-                    $this->error('   ❌ Slack template failed: ' . $slackResult['message']);
-                }
-            }
-
-            $this->newLine();
-            $this->displayResults($results);
-
-            return self::SUCCESS;
-
-        } catch (\Exception $e) {
-            $this->error('❌ Showcase failed: ' . $e->getMessage());
-            return self::FAILURE;
-        }
-    }
-
-    protected function testEmailTemplate(array $logData): array
-    {
-        try {
-            // Check if email is configured
-            $emailChannel = $this->notifierService->getChannels()['email'] ?? null;
-            
-            if (!$emailChannel) {
-                return ['success' => false, 'message' => 'Email channel not configured'];
-            }
-
-            if (!$emailChannel->isEnabled()) {
-                return ['success' => false, 'message' => 'Email channel not enabled'];
-            }
-
-            if (!$emailChannel->validateConfiguration()) {
-                return ['success' => false, 'message' => 'Email configuration invalid'];
-            }
-
-            // Send the test email
-            $result = $emailChannel->send($logData);
-            
-            return [
-                'success' => $result,
-                'message' => $result ? 'Professional email template sent!' : 'Failed to send email'
-            ];
-
-        } catch (\Exception $e) {
-            return ['success' => false, 'message' => $e->getMessage()];
-        }
-    }
-
-    protected function testSlackTemplate(array $logData): array
-    {
-        try {
-            // Check if slack is configured
-            $slackChannel = $this->notifierService->getChannels()['slack'] ?? null;
-            
-            if (!$slackChannel) {
-                return ['success' => false, 'message' => 'Slack channel not configured'];
-            }
-
-            if (!$slackChannel->isEnabled()) {
-                return ['success' => false, 'message' => 'Slack channel not enabled'];
-            }
-
-            if (!$slackChannel->validateConfiguration()) {
-                return ['success' => false, 'message' => 'Slack configuration invalid'];
-            }
-
-            // Send the test slack message
-            $result = $slackChannel->send($logData);
-            
-            return [
-                'success' => $result,
-                'message' => $result ? 'Professional Slack message sent!' : 'Failed to send Slack message'
-            ];
-
-        } catch (\Exception $e) {
-            return ['success' => false, 'message' => $e->getMessage()];
-        }
-    }
-
-    protected function displayResults(array $results): void
-    {
-        $this->info('📊 Showcase Results Summary:');
-        $this->newLine();
-
-        $tableData = [['Channel', 'Status', 'Message']];
-        
-        foreach ($results as $channel => $result) {
-            $status = $result['success'] ? '<fg=green>✅ SUCCESS</>' : '<fg=red>❌ FAILED</>';
-            $tableData[] = [
-                ucfirst($channel),
-                $status,
-                Str::limit($result['message'], 50)
-            ];
-        }
-
-        $this->table($tableData[0], array_slice($tableData, 1));
-
-        $this->newLine();
-        $this->comment('💡 Tips for better results:');
-        $this->line('   • For Email: Configure SMTP settings and set LOG_MANAGEMENT_EMAIL_TO');
-        $this->line('   • For Slack: Set up a webhook URL with LOG_MANAGEMENT_SLACK_WEBHOOK');
-        $this->line('   • Enable channels in config: LOG_MANAGEMENT_EMAIL_ENABLED=true');
-        $this->newLine();
-
-        // Show next steps
-        $this->info('🎯 Next Steps:');
-        $this->line('   1. Check your email inbox or Slack channel');
-        $this->line('   2. Review the professional template design');
-        $this->line('   3. Test with real errors: php artisan log-management:debug --generate-logs=3');
-        $this->line('   4. Configure notification settings for production use');
-        $this->newLine();
-
-        // Show configuration commands
-        $this->comment('⚙️ Quick Configuration Commands:');
-        $this->line('   php artisan log-management:test --channel=email');
-        $this->line('   php artisan log-management:test --channel=slack');
-        $this->line('   php artisan tinker # Then: NotificationSetting::createDefaults()');
+            'stack_trace' => $this->generateRealisticStackTrace($scenarioData['file_path'], $scenarioData['line_number']),
+        ], $scenarioData);
     }
 }
