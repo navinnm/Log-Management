@@ -9,6 +9,9 @@ use Illuminate\Routing\Router;
 use Fulgid\LogManagement\Commands\LogManagementInstallCommand;
 use Fulgid\LogManagement\Commands\LogManagementTestCommand;
 use Fulgid\LogManagement\Commands\LogManagementCleanupCommand;
+use Fulgid\LogManagement\Commands\LogManagementTestNotificationCommand;
+use Fulgid\LogManagement\Commands\LogManagementDebugCommand;
+use Fulgid\LogManagement\Commands\LogManagementShowcaseCommand;
 use Fulgid\LogManagement\Handlers\LogHandler;
 use Fulgid\LogManagement\Services\LogNotifierService;
 use Fulgid\LogManagement\Services\LogStreamService;
@@ -70,8 +73,9 @@ class LogManagementServiceProvider extends ServiceProvider
                 LogManagementInstallCommand::class,
                 LogManagementTestCommand::class,
                 LogManagementCleanupCommand::class,
-                \Fulgid\LogManagement\Commands\LogManagementTestNotificationCommand::class,
-
+                LogManagementTestNotificationCommand::class,
+                LogManagementDebugCommand::class,
+                LogManagementShowcaseCommand::class,
             ]);
         }
 
@@ -120,15 +124,22 @@ class LogManagementServiceProvider extends ServiceProvider
      */
     protected function registerLogHandler(): void
     {
-        $logHandler = new LogHandler(
-            $this->app->make(LogNotifierService::class),
-            $this->app->make(LogStreamService::class),
-            $this->app->make(LogFilterService::class)
-        );
+        try {
+            $logHandler = new LogHandler(
+                $this->app->make(LogNotifierService::class),
+                $this->app->make(LogStreamService::class),
+                $this->app->make(LogFilterService::class)
+            );
 
-        // Configure the log handler
-        $logger = Log::getLogger();
-        $logger->pushHandler($logHandler);
+            // Configure the log handler
+            $logger = Log::getLogger();
+            $logger->pushHandler($logHandler);
+            
+        } catch (\Exception $e) {
+            // Silently fail to prevent application from breaking
+            // Log to a separate error file
+            $this->logError('Failed to register log handler: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -136,10 +147,32 @@ class LogManagementServiceProvider extends ServiceProvider
      */
     protected function registerNotificationChannels(): void
     {
-        $notifierService = $this->app->make(LogNotifierService::class);
+        try {
+            $notifierService = $this->app->make(LogNotifierService::class);
 
-        $notifierService->addChannel('email', new EmailChannel());
-        $notifierService->addChannel('slack', new SlackChannel());
-        $notifierService->addChannel('webhook', new WebhookChannel());
+            $notifierService->addChannel('email', new EmailChannel());
+            $notifierService->addChannel('slack', new SlackChannel());
+            $notifierService->addChannel('webhook', new WebhookChannel());
+            
+        } catch (\Exception $e) {
+            // Silently fail to prevent application from breaking
+            $this->logError('Failed to register notification channels: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Log errors to a separate file to avoid infinite loops.
+     */
+    protected function logError(string $message): void
+    {
+        try {
+            $errorFile = storage_path('logs/log-management-provider.log');
+            $timestamp = date('Y-m-d H:i:s');
+            $errorMessage = "[$timestamp] LOG_MANAGEMENT_PROVIDER_ERROR: $message\n";
+            
+            file_put_contents($errorFile, $errorMessage, FILE_APPEND | LOCK_EX);
+        } catch (\Throwable $e) {
+            // Ultimate fallback - do nothing to prevent any loops
+        }
     }
 }
