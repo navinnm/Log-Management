@@ -48,6 +48,14 @@ class LogManagementServiceProvider extends ServiceProvider
         $this->app->bind('log-management', function ($app) {
             return $app->make(LogNotifierService::class);
         });
+
+        // Register custom exception handler if configured
+        if (config('log-management.debug.replace_default_handler', false)) {
+            $this->app->singleton(
+                \Illuminate\Contracts\Debug\ExceptionHandler::class,
+                \Fulgid\LogManagement\Exceptions\LogManagementExceptionHandler::class
+            );
+        }
     }
 
     /**

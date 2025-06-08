@@ -332,6 +332,11 @@ return [
         'enabled' => env('LOG_MANAGEMENT_DEBUG', false),
         'log_channel' => env('LOG_MANAGEMENT_DEBUG_CHANNEL', 'single'),
         'verbose_errors' => env('LOG_MANAGEMENT_VERBOSE_ERRORS', false),
+        'custom_screen' => env('LOG_MANAGEMENT_CUSTOM_DEBUG_SCREEN', true),
+        'replace_default_handler' => env('LOG_MANAGEMENT_REPLACE_EXCEPTION_HANDLER', false),
+        'show_similar_errors' => true,
+        'show_recent_logs' => true,
+        'show_system_stats' => true,
     ],
 
     /*
@@ -356,4 +361,5 @@ return [
             'forward_errors' => true,
         ],
     ],
+
 ];
