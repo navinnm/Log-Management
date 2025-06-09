@@ -312,7 +312,7 @@ class LogStreamController extends Controller
     /**
      * Get log entries for initial load or pagination.
      */
-    public function getLogs(Request $request)
+    public function getLogswithoutpagination(Request $request)
     {
         if (!$this->hasAccess($request)) {
             return response()->json(['error' => 'Unauthorized'], 403);
@@ -336,6 +336,64 @@ class LogStreamController extends Controller
                 'last_page' => $logs->lastPage(),
                 'per_page' => $logs->perPage(),
                 'total' => $logs->total(),
+            ]
+        ]);
+    }
+
+
+    public function getLogs(Request $request)
+    {
+        if (!$this->hasAccess($request)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $request->validate([
+            'page' => 'integer|min:1',
+            'per_page' => 'integer|min:1|max:200',
+            'level' => 'string',
+            'search' => 'string|max:255',
+            'from' => 'date',
+            'to' => 'date',
+        ]);
+
+        $query = LogEntry::query();
+
+        // Filter by level if specified
+        if ($request->has('level') && $request->level !== 'all') {
+            $query->where('level', $request->level);
+        }
+
+        // Search functionality
+        if ($request->has('search') && !empty($request->search)) {
+            $query->where('message', 'LIKE', '%' . $request->search . '%');
+        }
+
+        // Date filters
+        if ($request->has('from')) {
+            $query->where('created_at', '>=', $request->from);
+        }
+
+        if ($request->has('to')) {
+            $query->where('created_at', '<=', $request->to);
+        }
+
+        $perPage = $request->get('per_page', 50);
+        $page = $request->get('page', 1);
+        
+        // Get paginated results
+        $paginatedLogs = $query->orderBy('created_at', 'desc')
+                            ->paginate($perPage, ['*'], 'page', $page);
+
+        return response()->json([
+            'success' => true,
+            'data' => $paginatedLogs->items(),
+            'pagination' => [
+                'current_page' => $paginatedLogs->currentPage(),
+                'last_page' => $paginatedLogs->lastPage(),
+                'per_page' => $paginatedLogs->perPage(),
+                'total' => $paginatedLogs->total(),
+                'from' => $paginatedLogs->firstItem(),
+                'to' => $paginatedLogs->lastItem(),
             ]
         ]);
     }

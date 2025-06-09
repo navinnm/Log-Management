@@ -44,14 +44,18 @@ class LogManagementController extends Controller
                 ->count(),
         ];
 
-        $recentLogs = LogEntry::with([])
-            ->orderBy('created_at', 'desc')
-            ->limit(10)
+        // Try fetching more logs and without date restrictions
+        $recentLogs = LogEntry::orderBy('created_at', 'desc')
+            ->limit(50) // Increase limit
             ->get();
 
+        // Debug: Check if logs exist at all
+        $totalLogsInDb = LogEntry::count();
+        logger('Total logs in database: ' . $totalLogsInDb);
+        logger('Recent logs fetched: ' . $recentLogs->count());
+
         $levelStats = LogEntry::selectRaw('level, COUNT(*) as count')
-            ->where('created_at', '>=', now()->subDay())
-            ->groupBy('level')
+            ->groupBy('level') // Remove date restriction to see all logs
             ->pluck('count', 'level')
             ->toArray();
 
