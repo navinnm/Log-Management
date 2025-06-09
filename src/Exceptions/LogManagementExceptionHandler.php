@@ -13,12 +13,11 @@ class LogManagementExceptionHandler extends ExceptionHandler
 {
     protected LogNotifierService $logNotifier;
 
-    public function __construct($container)
-    {
-        parent::__construct($container);
-        $this->logNotifier = app(LogNotifierService::class);
-    }
-
+    public function __construct()
+        {
+            parent::__construct(app()); // Pass the container explicitly
+            $this->logNotifier = app(LogNotifierService::class);
+        }
     /**
      * Render an exception into an HTTP response.
      */
